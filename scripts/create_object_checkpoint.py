@@ -7,6 +7,7 @@ from pathlib import Path
 from lewm.jepa import JEPA
 from lewm.module import ARPredictor, Embedder, MLP
 import stable_worldmodel as swm
+from hydra.utils import instantiate
 
 
 
@@ -33,10 +34,17 @@ def main():
     )
     mlp = lambda k: MLP(input_dim=cfg[k]["input_dim"], output_dim=cfg[k]["output_dim"],
                         hidden_dim=cfg[k]["hidden_dim"], norm_fn=torch.nn.BatchNorm1d)
+
+    predictor_conf = cfg["predictor"]
+    predictor_conf.pop("_target_",None)
+    action_encoder_conf = cfg["action_encoder"]
+    action_encoder_conf.pop("_target_",None)
+
+
     model = JEPA(
         encoder=encoder,
-        predictor=ARPredictor(**cfg["predictor"]),
-        action_encoder=Embedder(**cfg["action_encoder"]),
+        predictor=ARPredictor(**predictor_conf),
+        action_encoder=Embedder(**action_encoder_conf),
         projector=mlp("projector"),
         pred_proj=mlp("pred_proj"),
     )
