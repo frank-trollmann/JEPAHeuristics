@@ -86,13 +86,6 @@ def _fix_state_dict(state_dict):
         new_key = new_key.replace("intermediate.dense.", "mlp.fc1.",1)
         new_key = new_key.replace("output.dense.", "mlp.fc2.",1)
 
-
-        """
-            if new_key.startswith("encoder.encoder."):
-                new_key = new_key.replace("encoder.encoder.", "encoder.", 1)
-            if "attention.attention." in new_key:
-                new_key = new_key.replace("attention.attention.","attention.",1)
-        """
         fixed_state_dict[new_key] = value
     return fixed_state_dict
 
