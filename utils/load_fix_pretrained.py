@@ -1,7 +1,9 @@
 """
-    This is a fixed implementationversion of the load_pretrained function in stable_worldmodel.wm.utils
+    This is a fixed implementation version of the load_pretrained function in stable_worldmodel.wm.utils
     The issue solved here is that the model checkpoints on huggingface contain unexpected keys (for example "encoder.encoder.layer.0.attention.attention.query.weight" instead of "encoder.layer.0.attention.attention.query.weight")
     This class implements the load_pretrained function in a way that checks for this issue and fixes it.
+    The issue is also reported in this pull request: https://github.com/lucas-maes/le-wm/pull/73
+    If the pull request gets merged, this implementation will become obsolete.
 """
 import torch
 import stable_worldmodel.wm.utils as utils
