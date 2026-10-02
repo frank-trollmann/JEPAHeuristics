@@ -1,4 +1,4 @@
-from utils.generate_true_distance_dataset import generate_true_distance_dataset
+from utils.true_distance.generate_true_distance_dataset import generate_true_distance_dataset
 from datetime import datetime
 import argparse
 import os
