@@ -19,4 +19,5 @@ dependencies = [
     "stable-pretraining>=0.1.8",
     "stable-worldmodel>=0.1.1",
     "torch>=2.14.0",
+    "xgboost>=3.4.1",
 ]
