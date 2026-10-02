@@ -34,13 +34,13 @@ def generate_jepa_heuristic_dataset(num_samples=1000, checkpoint_path=None):
   dataset_rows = []
 
   print(f"Generating {num_samples} samples...")
+
+  min_c, max_c = env.BORDER_SIZE, env.IMG_SIZE - env.BORDER_SIZE
   with torch.no_grad():
     for i in range(num_samples):
-      # Sample random coordinates (0-244 range)
-      pos_a = [random.randint(0, 244), random.randint(0, 244)]
-      pos_g = [random.randint(0, 244), random.randint(0, 244)]
-
-      # Extract images from environment
+      # Sample only within the safe content area (excluding borders)
+      pos_a = [random.randint(min_c, max_c), random.randint(min_c, max_c)]
+      pos_g = [random.randint(min_c, max_c), random.randint(min_c, max_c)]
       # Agent Position
       env.reset(options={"state": pos_a})
       img_a = env.render()  # Expected shape: (244, 244, 3)
