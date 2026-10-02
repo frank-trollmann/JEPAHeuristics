@@ -68,7 +68,7 @@ def dijkstra_distance(walkable: np.ndarray, start_xy, goal_xy):
           dist[ny, nx] = nd
           heapq.heappush(pq, (nd, nx, ny)) # new distance, x, y
 
-  return float("inf")  # no path found - shouldn't happen in TwoRoomEnv
+  return float("inf")  # no path found
 
 
 def _sample_valid_position(env: TwoRoomEnv, walkable: np.ndarray, rng: random.Random):
@@ -90,11 +90,12 @@ def generate_true_distance_dataset(
   num_samples=1000,
   checkpoint_path=None,
   seed=None,
+  device="cpu",
+  batch_size=1,
 ):
   """
   Generates a dataset of (agent_encoding, goal_encoding, heuristic), where
   `heuristic` is the TRUE shortest-path distance through the TwoRoom maze
-  (BFS/Dijkstra over the env's own wall mask)
   """
   print("Initializing Environment and Model...")
   env = TwoRoomEnv()
@@ -103,7 +104,6 @@ def generate_true_distance_dataset(
   rng = random.Random(seed)
 
   # If the checkpoint_path is not specified it defaults to the HF pretrained
-  # tworooms checkpoint, matching the convention
   if checkpoint_path is None:
     checkpoint_path = snapshot_download(
       repo_id="quentinll/lewm-tworooms",
@@ -112,44 +112,65 @@ def generate_true_distance_dataset(
 
   model = load_util.load_fix_pretrained(checkpoint_path)
   model.eval()
+  model = model.to(device) 
 
   dataset_rows = []
 
   print(f"Generating {num_samples} samples...")
-  with torch.no_grad(): # no inference (we dont train embeddings)
-    for i in range(num_samples):
-      pos_a = _sample_valid_position(env, walkable, rng)
-      pos_g = _sample_valid_position(env, walkable, rng)
+  with torch.no_grad(): # no gradient (we dont train embeddings)
+    num_done = 0
+    while num_done < num_samples:
+      # current batch size formula
+      current_batch = min(batch_size, num_samples - num_done)
 
-      env.reset(options={"state": pos_a})
-      img_a = env.render()
+      batch_pos_a = []
+      batch_pos_g = []
+      batch_imgs = []  # agent image, then goal image, per sample
 
-      env.reset(options={"state": pos_g})
-      img_g = env.render()
+      for _ in range(current_batch):
+        pos_a = _sample_valid_position(env, walkable, rng)
+        pos_g = _sample_valid_position(env, walkable, rng)
+        batch_pos_a.append(pos_a)
+        batch_pos_g.append(pos_g)
 
-      # Model expects (Batch, Time, Channel, H, W) -> (1, 1, 3, H, W)
-      t_img_a = torch.from_numpy(img_a).permute(2, 0, 1).float().unsqueeze(0).unsqueeze(0)
-      t_img_g = torch.from_numpy(img_g).permute(2, 0, 1).float().unsqueeze(0).unsqueeze(0)
+        env.reset(options={"state": pos_a})
+        batch_imgs.append(env.render())
 
-      enc_a = model.encode({"pixels": t_img_a})["emb"]
-      enc_g = model.encode({"pixels": t_img_g})["emb"]
+        env.reset(options={"state": pos_g})
+        batch_imgs.append(env.render())
 
-      vec_a = enc_a.squeeze().numpy()
-      vec_g = enc_g.squeeze().numpy()
+      # Stack all 2*(agent + goal) current_batch images into one (B, T=1, C, H, W) batch
+      imgs_np = np.stack(batch_imgs)  # merge all images of batch into single array 
+      t_imgs = ( # bring array into models required format 
+        torch.from_numpy(imgs_np) # to tensor
+        .permute(0, 3, 1, 2) # change axis (batch, C (color channels), H, W)
+        .float()
+        .unsqueeze(1) # Add T
+        .to(device)
+      ) 
 
-      dist = dijkstra_distance(walkable, pos_a, pos_g)
+      # create embeddings
+      enc = model.encode({"pixels": t_imgs})["emb"] 
+      enc = enc.squeeze(1).cpu().numpy()  # Remove T 
 
-      dataset_rows.append({
-        # embedding
-        "agent_pos_enc": vec_a,
-        "goal_pos_enc": vec_g,
-        "heuristic": dist,
-        # coordinate 
-        "agent_pos": pos_a, 
-        "goal_pos": pos_g,
-      })
+      vecs_a = enc[0::2]  # agent embeddings
+      vecs_g = enc[1::2]  # goal embeddings
 
-      if (i + 1) % 100 == 0:
-        print(f"Progress: {i + 1}/{num_samples}")
+      for i in range(current_batch):
+        dist = dijkstra_distance(walkable, batch_pos_a[i], batch_pos_g[i])
+        dataset_rows.append({
+          # embedding
+          "agent_pos_enc": vecs_a[i],
+          "goal_pos_enc": vecs_g[i],
+          # distance 
+          "heuristic": dist,
+          # coordinate
+          "agent_pos": batch_pos_a[i],
+          "goal_pos": batch_pos_g[i],
+        })
+
+      num_done += current_batch
+      if num_done % 100 == 0 or num_done == num_samples:
+        print(f"Progress: {num_done}/{num_samples}")
 
   return pd.DataFrame(dataset_rows)
