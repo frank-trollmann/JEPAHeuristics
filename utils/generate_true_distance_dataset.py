@@ -37,8 +37,9 @@ def build_occupancy_grid(env: TwoRoomEnv):
   return (~wall_mask).numpy() # return !boolean value
 
 
-def bfs_distance(walkable: np.ndarray, start_xy, goal_xy):
+def dijkstra_distance(walkable: np.ndarray, start_xy, goal_xy):
   """
+  Shortest-path distance over the walkable grid via Dijkstra.
   """
   H, W = walkable.shape # boolean numpy array from above 
   sx, sy = int(round(start_xy[0])), int(round(start_xy[1])) 
@@ -136,7 +137,7 @@ def generate_true_distance_dataset(
       vec_a = enc_a.squeeze().numpy()
       vec_g = enc_g.squeeze().numpy()
 
-      dist = bfs_distance(walkable, pos_a, pos_g)
+      dist = dijkstra_distance(walkable, pos_a, pos_g)
 
       dataset_rows.append({
         # embedding
