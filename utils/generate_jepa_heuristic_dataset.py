@@ -21,7 +21,14 @@ def generate_jepa_heuristic_dataset(num_samples=1000, checkpoint_path=None):
     revision="77adaae0bc31deab21c93740d1f8bb947cd0bdec",
     )
 
+  if torch.cuda.is_available():
+    device = torch.device("cuda")
+  elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+  else:
+    device = torch.device("cpu")
   model = load_util.load_fix_pretrained(checkpoint_path)
+  model.to(device)
   model.eval()  # Set to evaluation mode
 
   dataset_rows = []
@@ -46,8 +53,8 @@ def generate_jepa_heuristic_dataset(num_samples=1000, checkpoint_path=None):
       # Model expects (Batch, Time, Channel, H, W) -> (1, 1, 3, 244, 244)
       # Convert numpy array to tensor, permute to (C, H, W),
       # then unsqueeze twice: once for Batch, once for Time.
-      t_img_a = torch.from_numpy(img_a).permute(2, 0, 1).float().unsqueeze(0).unsqueeze(0)
-      t_img_g = torch.from_numpy(img_g).permute(2, 0, 1).float().unsqueeze(0).unsqueeze(0)
+      t_img_a = torch.from_numpy(img_a).permute(2, 0, 1).float().unsqueeze(0).unsqueeze(0).to(device)
+      t_img_g = torch.from_numpy(img_g).permute(2, 0, 1).float().unsqueeze(0).unsqueeze(0).to(device)
 
       # Encode images to Latent Space
       # We wrap in a dict because model.encode expects the format used by the DataLoader
@@ -55,8 +62,8 @@ def generate_jepa_heuristic_dataset(num_samples=1000, checkpoint_path=None):
       enc_g = model.encode({"pixels": t_img_g})["emb"]
 
       # Squeeze the tensors to get a flat 192-dim vector
-      vec_a = enc_a.squeeze().numpy()
-      vec_g = enc_g.squeeze().numpy()
+      vec_a = enc_a.detach().cpu().squeeze().numpy()
+      vec_g = enc_g.detach().cpu().squeeze().numpy()
 
       # Calculate Ground Truth Heuristic (Euclidean Distance)
       dist = np.linalg.norm(np.array(pos_a) - np.array(pos_g))
