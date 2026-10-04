@@ -6,6 +6,9 @@ __pycache__/
 # JetBrains IDE specific file
 .idea/
 
+# Generated datasets (large, shouldn't live in git history)
+data/
+
 # C extensions
 *.so
 
