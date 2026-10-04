@@ -4,7 +4,7 @@ import argparse
 import pandas as pd
 
 
-def main(dataset_path, n_trials, device, models_dir, log_path, seed):
+def main(dataset_path, n_trials, device, models_dir, log_path, seed, n_jobs):
     dataset = pd.read_pickle(dataset_path)
     X, y = heuristic_dataset_to_xy(dataset)
 
@@ -15,6 +15,7 @@ def main(dataset_path, n_trials, device, models_dir, log_path, seed):
         device=device,
         models_dir=models_dir,
         seed=seed,
+        n_jobs=n_jobs,
     )
 
     log_experiment(results.to_dict("records"), path=log_path)
@@ -71,6 +72,14 @@ if __name__ == "__main__":
         help="Random seed for the train/val/test split and model training",
     )
 
+    parser.add_argument(
+        "--n_jobs",
+        type=int,
+        default=None,
+        help="CPU cores for Random Forest (None=1 core, -1=all cores). "
+             "Safe default of 1 core - pass a higher number explicitly on a shared machine with headroom.",
+    )
+
     args = parser.parse_args()
 
     main(
@@ -80,4 +89,5 @@ if __name__ == "__main__":
         models_dir=args.models_dir,
         log_path=args.log_path,
         seed=args.seed,
+        n_jobs=args.n_jobs,
     )

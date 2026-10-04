@@ -4,17 +4,19 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 
 
-def train_random_forest(X_train, y_train, params=None, random_state=42):
+def train_random_forest(X_train, y_train, params=None, random_state=42, n_jobs=None):
   """
-  Fit a RandomForestRegressor with the given hyperparameters
+  Fit a RandomForestRegressor with the given hyperparameters.
+
+  n_jobs: how many CPU cores to use to build the trees in parallel.
   """
   params = params or {}
-  model = RandomForestRegressor(random_state=random_state, **params)
+  model = RandomForestRegressor(random_state=random_state, n_jobs=n_jobs, **params)
   model.fit(X_train, y_train)
   return model
 
 
-def _objective(trial, X_train, y_train, X_val, y_val, random_state):
+def _objective(trial, X_train, y_train, X_val, y_val, random_state, n_jobs):
   params = {
     "n_estimators": trial.suggest_int("n_estimators", 50, 500),
     "max_depth": trial.suggest_int("max_depth", 3, 30),
@@ -22,19 +24,21 @@ def _objective(trial, X_train, y_train, X_val, y_val, random_state):
     "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 20),
     "max_features": trial.suggest_categorical("max_features", ["sqrt", "log2", None]),
   }
-  model = train_random_forest(X_train, y_train, params, random_state=random_state)
+  model = train_random_forest(X_train, y_train, params, random_state=random_state, n_jobs=n_jobs)
   y_pred = model.predict(X_val)
   return mean_absolute_error(y_val, y_pred)
 
 
-def tune_random_forest(X_train, y_train, X_val, y_val, n_trials=50, random_state=42, seed=None):
+def tune_random_forest(
+  X_train, y_train, X_val, y_val, n_trials=50, random_state=42, seed=None, n_jobs=None
+):
   """
   Optuna hyperparameter search for RandomForestRegressor
   """
   sampler = optuna.samplers.TPESampler(seed=seed)
   study = optuna.create_study(direction="minimize", sampler=sampler)
   study.optimize(
-    lambda trial: _objective(trial, X_train, y_train, X_val, y_val, random_state),
+    lambda trial: _objective(trial, X_train, y_train, X_val, y_val, random_state, n_jobs),
     n_trials=n_trials,
   )
   return study.best_params, study

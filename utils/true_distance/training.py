@@ -50,6 +50,7 @@ def train_and_compare_models(
   device="cpu",
   models_dir="models",
   seed=42,
+  n_jobs=None,
 ):
   """
   Full pipeline: split -> tune each model on Train/Val -> final fit on
@@ -74,9 +75,9 @@ def train_and_compare_models(
 
   # --- Random Forest ---
   best_params, _ = tune_random_forest(
-    X_train, y_train, X_val, y_val, n_trials=n_trials, random_state=seed, seed=seed
+    X_train, y_train, X_val, y_val, n_trials=n_trials, random_state=seed, seed=seed, n_jobs=n_jobs
   )
-  model = train_random_forest(X_train, y_train, params=best_params, random_state=seed)
+  model = train_random_forest(X_train, y_train, params=best_params, random_state=seed, n_jobs=n_jobs)
   metrics = evaluate_model(model, X_test, y_test)
   path = os.path.join(models_dir, f"{timestamp}_random_forest.joblib")
   save_random_forest(model, path)
