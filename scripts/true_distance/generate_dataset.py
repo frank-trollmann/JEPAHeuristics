@@ -1,12 +1,19 @@
-from utils.true_distance.generate_true_distance_dataset import generate_true_distance_dataset
+from utils.true_distance.generate_true_distance_dataset import (
+    generate_true_distance_dataset,
+    DistanceAlgorithm,
+)
 from datetime import datetime
 import argparse
 import os
 
 
-def main(num_samples: int, device: str, seed: int, batch_size: int):
+def main(num_samples: int, device: str, seed: int, batch_size: int, algorithm: DistanceAlgorithm):
     dataset = generate_true_distance_dataset(
-        num_samples=num_samples, seed=seed, device=device, batch_size=batch_size
+        num_samples=num_samples,
+        seed=seed,
+        device=device,
+        batch_size=batch_size,
+        algorithm=algorithm,
     )
 
     os.makedirs("data", exist_ok=True)
@@ -51,6 +58,14 @@ if __name__ == "__main__":
         help="Samples per encoder batch (2x this many images per call) - raise this to make better use of a GPU",
     )
 
+    parser.add_argument(
+        "--algorithm",
+        type=str,
+        default=DistanceAlgorithm.MAZE_FORMULA.value,
+        choices=[a.value for a in DistanceAlgorithm],
+        help="Distance algorithm for the heuristic label - maze_formula (fast, default) or dijkstra (slow, reference/comparison only)",
+    )
+
     args = parser.parse_args()
 
     main(
@@ -58,4 +73,5 @@ if __name__ == "__main__":
         device=args.device,
         seed=args.seed,
         batch_size=args.batch_size,
+        algorithm=DistanceAlgorithm(args.algorithm),
     )

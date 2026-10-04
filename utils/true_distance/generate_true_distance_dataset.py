@@ -1,5 +1,6 @@
 import heapq
 import random
+from enum import Enum
 
 import numpy as np
 import pandas as pd
@@ -8,6 +9,11 @@ from huggingface_hub import snapshot_download
 from stable_worldmodel.envs.two_room import TwoRoomEnv
 
 import utils.load_fix_pretrained as load_util
+
+
+class DistanceAlgorithm(Enum):
+  MAZE_FORMULA = "maze_formula"
+  DIJKSTRA = "dijkstra"
 
 
 # all possible neighbor pairs for a given position
@@ -146,6 +152,23 @@ def true_distance(pos_a, pos_g, geom):
   return float(true_distance_batch([pos_a], [pos_g], geom)[0])
 
 
+def compute_batch_distances(pos_a_batch, pos_g_batch, geom, walkable, algorithm: DistanceAlgorithm):
+  """
+  Dispatch to the selected distance algorithm for a batch of (agent, goal)
+  position pairs. Pulled out of generate_true_distance_dataset so it can be
+  unit-tested without needing the encoder/checkpoint.
+  """
+  if algorithm is DistanceAlgorithm.MAZE_FORMULA:
+    return true_distance_batch(pos_a_batch, pos_g_batch, geom)
+  elif algorithm is DistanceAlgorithm.DIJKSTRA:
+    return [
+      dijkstra_distance(walkable, a, g)
+      for a, g in zip(pos_a_batch, pos_g_batch)
+    ]
+  else:
+    raise ValueError(f"Unsupported algorithm: {algorithm}")
+
+
 def _sample_valid_position(env: TwoRoomEnv, walkable: np.ndarray, rng: random.Random):
   """
   Sample a random walkable position within the env's valid bounds.
@@ -167,10 +190,10 @@ def generate_true_distance_dataset(
   seed=None,
   device="cpu",
   batch_size=1,
+  algorithm: DistanceAlgorithm = DistanceAlgorithm.MAZE_FORMULA,
 ):
   """
-  Generates a dataset of (agent_encoding, goal_encoding, heuristic), where
-  `heuristic` is the TRUE shortest-path distance through the TwoRoom maze
+  Generates a dataset of (agent_encoding, goal_encoding, heuristic)
   """
   print("Initializing Environment and Model...")
   env = TwoRoomEnv()
@@ -232,9 +255,7 @@ def generate_true_distance_dataset(
       vecs_a = enc[0::2]  # agent embeddings
       vecs_g = enc[1::2]  # goal embeddings
 
-      # Vectorized distance for the whole batch at once (O(1) per pair,
-      # no grid search - see true_distance_batch).
-      batch_dists = true_distance_batch(batch_pos_a, batch_pos_g, geom)
+      batch_dists = compute_batch_distances(batch_pos_a, batch_pos_g, geom, walkable, algorithm)
 
       for i in range(current_batch):
         dataset_rows.append({

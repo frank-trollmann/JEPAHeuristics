@@ -5,9 +5,11 @@ import pytest
 from stable_worldmodel.envs.two_room import TwoRoomEnv
 
 from utils.true_distance.generate_true_distance_dataset import (
+    DistanceAlgorithm,
     _sample_valid_position,
     _wall_geometry,
     build_occupancy_grid,
+    compute_batch_distances,
     dijkstra_distance,
     true_distance,
     true_distance_batch,
@@ -96,3 +98,37 @@ def test_batch_handles_single_pair():
     geom = {"axis": 1, "center": 112.0, "door_positions": [49.0], "door_sizes": [14.0]}
     result = true_distance_batch([[30.0, 30.0]], [[60.0, 190.0]], geom)
     assert result.shape == (1,)
+
+
+def test_compute_batch_distances_maze_formula_matches_true_distance_batch(env_geom_walkable):
+    env, geom, walkable = env_geom_walkable
+    rng = random.Random(7)
+    pos_a_list = [_sample_valid_position(env, walkable, rng) for _ in range(10)]
+    pos_g_list = [_sample_valid_position(env, walkable, rng) for _ in range(10)]
+
+    expected = true_distance_batch(pos_a_list, pos_g_list, geom)
+    result = compute_batch_distances(
+        pos_a_list, pos_g_list, geom, walkable, DistanceAlgorithm.MAZE_FORMULA
+    )
+
+    np.testing.assert_allclose(result, expected, rtol=1e-9)
+
+
+def test_compute_batch_distances_dijkstra_matches_dijkstra_distance(env_geom_walkable):
+    env, geom, walkable = env_geom_walkable
+    rng = random.Random(8)
+    pos_a_list = [_sample_valid_position(env, walkable, rng) for _ in range(10)]
+    pos_g_list = [_sample_valid_position(env, walkable, rng) for _ in range(10)]
+
+    expected = [dijkstra_distance(walkable, a, g) for a, g in zip(pos_a_list, pos_g_list)]
+    result = compute_batch_distances(
+        pos_a_list, pos_g_list, geom, walkable, DistanceAlgorithm.DIJKSTRA
+    )
+
+    np.testing.assert_allclose(result, expected, rtol=1e-9)
+
+
+def test_compute_batch_distances_rejects_unsupported_algorithm(env_geom_walkable):
+    env, geom, walkable = env_geom_walkable
+    with pytest.raises(ValueError):
+        compute_batch_distances([[30.0, 30.0]], [[60.0, 190.0]], geom, walkable, "not_an_algorithm")
