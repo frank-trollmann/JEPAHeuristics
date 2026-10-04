@@ -7,8 +7,8 @@ __pycache__/
 .idea/
 
 # Generated datasets and trained models (large, shouldn't live in git history)
-data/
-models/
+/data/
+/models/
 
 # C extensions
 *.so
