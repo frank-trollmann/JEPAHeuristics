@@ -71,6 +71,81 @@ def dijkstra_distance(walkable: np.ndarray, start_xy, goal_xy):
   return float("inf")  # no path found
 
 
+def _wall_geometry(env: TwoRoomEnv):
+  """
+  Read the current wall/door layout out of a TwoRoomEnv.
+  Wall/door config stays the same for each train sample, only agent and target change
+  """
+  return {
+    "axis": env.wall_axis,  # on which axis is the wall (x = 1 , y = 0)
+    "center": float(env.WALL_CENTER), # where on the axis lays the wall (x=112)
+    "door_positions": env.door_positions[: env.num_doors].tolist(), # y coordinates of the center of the door(s)
+    "door_sizes": env.door_sizes[: env.num_doors].tolist(), # margin of the door 
+  }
+
+
+def true_distance_batch(pos_a, pos_g, geom):
+  """
+  Vectorized, exact shortest-path distance for a batch of (agent, goal)
+  """
+  pos_a = np.asarray(pos_a, dtype=float).reshape(-1, 2)
+  pos_g = np.asarray(pos_g, dtype=float).reshape(-1, 2)
+
+  axis_idx = 0 if geom["axis"] == 1 else 1 # axis of the wall (x)
+  other_idx = 1 - axis_idx # y coordinate of the wall center
+  center = geom["center"]
+
+  # are agent and target in the same room
+  same_room = (pos_a[:, axis_idx] < center) == (pos_g[:, axis_idx] < center)
+  # euclidian distance goal and target 
+  euclid = np.linalg.norm(pos_a - pos_g, axis=1)
+
+  best_cross = np.full(len(pos_a), np.inf) # for every agent in batch, add inf 
+
+  # loop over every door in the maze
+  for door_c, door_s in zip(geom["door_positions"], geom["door_sizes"]):
+    lo, hi = door_c - door_s, door_c + door_s # boarders for each door 
+
+
+    # at which t do we reach the wall?
+    # t is the progress (0-1) the agent has made from start to goal 
+
+    # P(t) = a + t * (g - a) => returns x and y coodrinate of the agent 
+
+    # now we re order the formula
+    # center = a_x + t * (g_x - a_x)
+    # center - a_x = t * (g_x - a_x)
+    # t = (center - a_x) / (g_x - a_x)
+
+
+    denom = pos_g[:, axis_idx] - pos_a[:, axis_idx] # g-a on axis coordinates (x-axis)
+    denom = np.where(denom == 0, 1e-9, denom) # safety measure if g = a 
+    t = (center - pos_a[:, axis_idx]) / denom # formula from above
+
+    # P(t) = a + t * (g - a) => returns other axis coordinate (y)
+    cross_other = pos_a[:, other_idx] + t * (pos_g[:, other_idx] - pos_a[:, other_idx])
+
+    # put other axis (y) in space of the door (closest border of the door)
+    gate_other = np.clip(cross_other, lo, hi)
+
+    gate = np.empty_like(pos_a) # new empty array of shape pos a 
+    gate[:, axis_idx] = center # x axis on border (112)
+    gate[:, other_idx] = gate_other # y coordinate calculated above
+
+    # euclidean distance from start to door + euclidean distance from door to target
+    
+    d = np.linalg.norm(pos_a - gate, axis=1) + np.linalg.norm(gate - pos_g, axis=1)
+    # check if current door is the best door 
+    best_cross = np.minimum(best_cross, d)
+
+  return np.where(same_room, euclid, best_cross)
+
+
+def true_distance(pos_a, pos_g, geom):
+  """Single-pair convenience wrapper around true_distance_batch (reference/testing)."""
+  return float(true_distance_batch([pos_a], [pos_g], geom)[0])
+
+
 def _sample_valid_position(env: TwoRoomEnv, walkable: np.ndarray, rng: random.Random):
   """
   Sample a random walkable position within the env's valid bounds.
@@ -101,6 +176,7 @@ def generate_true_distance_dataset(
   env = TwoRoomEnv()
   env.reset()  # populate default wall/door layout
   walkable = build_occupancy_grid(env)
+  geom = _wall_geometry(env)
   rng = random.Random(seed)
 
   # If the checkpoint_path is not specified it defaults to the HF pretrained
@@ -156,14 +232,17 @@ def generate_true_distance_dataset(
       vecs_a = enc[0::2]  # agent embeddings
       vecs_g = enc[1::2]  # goal embeddings
 
+      # Vectorized distance for the whole batch at once (O(1) per pair,
+      # no grid search - see true_distance_batch).
+      batch_dists = true_distance_batch(batch_pos_a, batch_pos_g, geom)
+
       for i in range(current_batch):
-        dist = dijkstra_distance(walkable, batch_pos_a[i], batch_pos_g[i])
         dataset_rows.append({
           # embedding
           "agent_pos_enc": vecs_a[i],
           "goal_pos_enc": vecs_g[i],
-          # distance 
-          "heuristic": dist,
+          # distance
+          "heuristic": batch_dists[i],
           # coordinate
           "agent_pos": batch_pos_a[i],
           "goal_pos": batch_pos_g[i],
