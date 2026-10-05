@@ -10,13 +10,24 @@ dependencies = [
     "hydra-core>=1.3.7",
     "imageio>=2.37.4",
     "ipykernel>=7.3.0",
+    "joblib>=1.6.0",
     "matplotlib>=3.11.2",
     "numpy>=2.5.3",
     "opencv-python>=5.0.0.93",
+    "optuna>=5.0.0",
     "pandas>=3.0.6",
     "scikit-learn>=1.9.1",
     "scipy-stubs~=1.18.1",
     "stable-pretraining>=0.1.8",
     "stable-worldmodel>=0.1.1",
     "torch>=2.14.0",
+    "xgboost>=3.4.1",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

@@ -6,6 +6,10 @@ __pycache__/
 # JetBrains IDE specific file
 .idea/
 
+# Generated datasets and trained models (large, shouldn't live in git history)
+/data/
+/models/
+
 # C extensions
 *.so
 
@@ -222,3 +226,5 @@ __marimo__/
 
 # environment
 environment
+
+/data
