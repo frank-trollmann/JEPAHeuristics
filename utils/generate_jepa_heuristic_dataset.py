@@ -43,14 +43,14 @@ def generate_jepa_heuristic_dataset(num_samples=1000, checkpoint_path=None):
       pos_g = [random.randint(min_c, max_c), random.randint(min_c, max_c)]
       # Agent Position
       env.reset(options={"state": pos_a})
-      img_a = env.render()  # Expected shape: (244, 244, 3)
+      img_a = env.render()  # Expected shape: (224, 224, 3)
 
       # Goal Position
       env.reset(options={"state": pos_g})
-      img_g = env.render()  # Expected shape: (244, 244, 3)
+      img_g = env.render()  # Expected shape: (224, 224, 3)
 
       # Preprocess images for the model
-      # Model expects (Batch, Time, Channel, H, W) -> (1, 1, 3, 244, 244)
+      # Model expects (Batch, Time, Channel, H, W) -> (1, 1, 3, 224, 224)
       # Convert numpy array to tensor, permute to (C, H, W),
       # then unsqueeze twice: once for Batch, once for Time.
       t_img_a = torch.from_numpy(img_a).permute(2, 0, 1).float().unsqueeze(0).unsqueeze(0).to(device)

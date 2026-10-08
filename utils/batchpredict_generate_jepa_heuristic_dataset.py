@@ -60,7 +60,7 @@ def batchpredict_generate_jepa_heuristic_dataset(num_samples=1000, batch_size=32
       coords_g.append(pos_g)
 
     # 2. Convert lists to Batched Tensors
-    # Shape: (Batch, Time=1, Channel, H, W) -> (batch_size, 1, 3, 244, 244)
+    # Shape: (Batch, Time=1, Channel, H, W) -> (batch_size, 1, 3, 224, 224)
     t_batch_a = torch.from_numpy(np.array(agent_images)).permute(0, 3, 1, 2).float().unsqueeze(1).to(device)
     t_batch_g = torch.from_numpy(np.array(goal_images)).permute(0, 3, 1, 2).float().unsqueeze(1).to(device)
 
