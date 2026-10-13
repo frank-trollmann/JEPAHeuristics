@@ -222,3 +222,14 @@ __marimo__/
 
 # environment
 environment
+# Local AI-agent files (not for the shared repo)
+.vibe-wise/
+CLAUDE.md
+.claude/
+docs/superpowers/
+.agent/
+
+# Generated datasets and experiment outputs
+data/
+models/
+stable_worldmodel/
