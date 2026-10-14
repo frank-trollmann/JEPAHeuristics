@@ -4,7 +4,7 @@ from stable_worldmodel.envs.two_room import TwoRoomEnv
 
 from utils.pair_dataset import euclidean_labels
 from utils.position_dataset import valid_positions
-from utils.reference_distance import build_grid_graph, grid_labels
+from utils.reference_distance import build_grid_graph, door_geometry, formula_labels, grid_labels
 
 
 def distances_between(positions, pairs):
@@ -82,3 +82,68 @@ def test_crossing_far_from_the_door_needs_a_long_detour(two_room):
   straight = euclidean_labels(positions, np.array([agent]), np.array([goal]))[0]
 
   assert grid > 1.3 * straight
+
+
+# --- continuous formula -----------------------------------------------------
+
+@pytest.fixture(scope="module")
+def geometries():
+  env = TwoRoomEnv()
+  env.reset()
+  return door_geometry(env, inflated=True), door_geometry(env, inflated=False)
+
+
+def formula(a, g, geometry):
+  return formula_labels(np.array([a], dtype=float), np.array([g], dtype=float), geometry)[0]
+
+
+def test_formula_is_the_straight_line_when_nothing_blocks_it(geometries):
+  grown, thin = geometries
+
+  for geometry in geometries:
+    assert formula((50, 150), (60, 120), geometry) == pytest.approx(np.hypot(10, 30))  # same room
+    assert formula((50, 49), (170, 49), geometry) == pytest.approx(120.0)  # straight through the door
+
+
+def test_thin_formula_bends_around_the_door_edge_exactly(geometries):
+  _, thin = geometries
+
+  # the door edge is at (112, 63): the path is two straight pieces
+  expected = np.hypot(112 - 50, 150 - 63) + np.hypot(170 - 112, 150 - 63)
+  assert formula((50, 150), (170, 150), thin) == pytest.approx(expected, abs=0.01)
+
+
+def test_grown_wall_formula_lies_between_two_independent_bounds(geometries):
+  grown, _ = geometries
+  # lower bound: a point agent going around the wall pixel centres (107, 64) and (117, 64)
+  lower = np.hypot(107 - 50, 150 - 64) + 10 + np.hypot(170 - 117, 150 - 64)
+  # upper bound: the same path around the corners of the square grown wall (100, 56) and (124, 56)
+  upper = np.hypot(100 - 50, 150 - 56) + 24 + np.hypot(170 - 124, 150 - 56)
+
+  assert lower < formula((50, 150), (170, 150), grown) < upper
+
+
+def test_formula_is_symmetric_and_the_vertex_paths_are_finite(geometries):
+  grown, thin = geometries
+
+  for geometry in geometries:
+    assert np.isfinite(geometry["paths"]).all()
+    assert np.allclose(geometry["paths"], geometry["paths"].T)
+  assert formula((50, 150), (170, 90), grown) == pytest.approx(formula((170, 90), (50, 150), grown))
+
+
+def test_formula_agrees_with_the_grid_label_on_the_real_map(two_room, geometries):
+  positions, graph = two_room
+  grown, _ = geometries
+  rng = np.random.default_rng(0)
+  agent = rng.integers(0, len(positions), 2000)
+  goal = rng.integers(0, len(positions), 2000)
+
+  grid = grid_labels(graph, agent, goal)
+  continuous = formula_labels(positions[agent].astype(float), positions[goal].astype(float), grown)
+  relative = (grid - continuous) / np.maximum(continuous, 1)
+
+  assert np.isfinite(continuous).all()
+  assert (continuous >= euclidean_labels(positions, agent, goal) - 1e-6).all()
+  # 8-direction steps can only make paths longer, by at most about 10%
+  assert relative.min() > -0.01 and relative.max() < 0.12
