@@ -1,6 +1,7 @@
 import numpy as np
 
 from utils.heuristic_models import fit_linear, fit_mean_baseline, latent_distance, metrics, train_mlp
+from utils.pair_dataset import concat_features
 
 
 def test_metrics_perfect_and_mean_predictions():
@@ -29,12 +30,15 @@ def test_latent_distance_squared_and_plain():
 
 def test_mlp_learns_a_distance_that_a_linear_model_cannot():
   rng = np.random.default_rng(0)
-  x = rng.uniform(-1, 1, size=(4000, 4))  # agent (x, y) and goal (x, y)
-  y = np.linalg.norm(x[:, :2] - x[:, 2:], axis=1)
+  encodings = rng.uniform(-1, 1, size=(300, 2))  # stand-ins for encodings: 2-D points
+  agent, goal = rng.integers(0, 300, 4000), rng.integers(0, 300, 4000)
+  label = np.linalg.norm(encodings[agent] - encodings[goal], axis=1)
   train, val = slice(0, 3000), slice(3000, 4000)
 
-  predict = train_mlp(x[train], y[train], x[val], y[val], device="cpu", seed=0, epochs=40)
-  linear = fit_linear(x[train], y[train])
+  predict = train_mlp(encodings, (agent[train], goal[train], label[train]),
+                      (agent[val], goal[val], label[val]), device="cpu", seed=0, epochs=40)
+  linear = fit_linear(concat_features(encodings, agent[train], goal[train]), label[train])
 
-  assert metrics(y[val], predict(x[val]))["r2"] > 0.9
-  assert metrics(y[val], linear.predict(x[val]))["r2"] < 0.5
+  assert metrics(label[val], predict(agent[val], goal[val]))["r2"] > 0.9
+  linear_prediction = linear.predict(concat_features(encodings, agent[val], goal[val]))
+  assert metrics(label[val], linear_prediction)["r2"] < 0.5
