@@ -53,28 +53,35 @@ def split_positions(num_positions, seed, fractions=(0.7, 0.15, 0.15)):
   return names
 
 
-def encode_positions(env, model, positions, device, batch_size=256):
+def encode_frames(model, frames, device):
   """
-  Renders the agent at every position and encodes the image with the JEPA encoder.
+  Encodes rendered frames (N, H, W, 3), uint8, with the JEPA encoder.
   Images are preprocessed like in the original LeWM evaluation:
   scaled to [0, 1], then ImageNet-normalised.
-  Returns a float array of shape (N, latent_dim), in the order of positions.
+  Returns a float array of shape (N, latent_dim).
   """
   mean = torch.tensor(dataset_stats.ImageNet["mean"]).view(1, 3, 1, 1)
   std = torch.tensor(dataset_stats.ImageNet["std"]).view(1, 3, 1, 1)
 
+  images = torch.from_numpy(np.asarray(frames)).permute(0, 3, 1, 2).float() / 255.0
+  images = ((images - mean) / std).unsqueeze(1).to(device)  # (N, Time=1, 3, H, W)
+
+  with torch.no_grad():
+    embeddings = model.encode({"pixels": images})["emb"]  # (N, 1, latent_dim)
+  return embeddings[:, 0].cpu().numpy()
+
+
+def encode_positions(env, model, positions, device, batch_size=256):
+  """
+  Renders the agent at every position and encodes the image with the JEPA encoder.
+  Returns a float array of shape (N, latent_dim), in the order of positions.
+  """
   encodings = []
   for start in range(0, len(positions), batch_size):
     frames = []
     for x, y in positions[start:start + batch_size]:
       env.reset(options={"state": [int(x), int(y)]})
       frames.append(env.render())  # (H, W, 3) uint8
-
-    images = torch.from_numpy(np.stack(frames)).permute(0, 3, 1, 2).float() / 255.0
-    images = ((images - mean) / std).unsqueeze(1).to(device)  # (B, Time=1, 3, H, W)
-
-    with torch.no_grad():
-      embeddings = model.encode({"pixels": images})["emb"]  # (B, 1, latent_dim)
-    encodings.append(embeddings[:, 0].cpu().numpy())
+    encodings.append(encode_frames(model, frames, device))
 
   return np.concatenate(encodings)
