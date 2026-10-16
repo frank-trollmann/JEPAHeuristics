@@ -29,7 +29,6 @@ _ORTHOGONAL_NEIGHBORS = [
 _DIAGONAL_NEIGHBORS = [
   (-1, -1, 2 ** 0.5), (-1, 1, 2 ** 0.5), (1, -1, 2 ** 0.5), (1, 1, 2 ** 0.5),
 ]
-_NEIGHBORS = _ORTHOGONAL_NEIGHBORS + _DIAGONAL_NEIGHBORS # all possible neighbors 
 
 
 def build_occupancy_grid(env: TwoRoomEnv):
@@ -64,15 +63,28 @@ def dijkstra_distance(walkable: np.ndarray, start_xy, goal_xy):
       continue
     if (x, y) == (gx, gy): # if pos = goal return 
       return d
-    for dy, dx, cost in _NEIGHBORS:
+    # orthogonal moves: only need the destination cell to be walkable
+    for dy, dx, cost in _ORTHOGONAL_NEIGHBORS:
       nx, ny = x + dx, y + dy
-
-      # pos is in grid height / width and is walkable 
       if 0 <= nx < W and 0 <= ny < H and walkable[ny, nx]:
-        nd = d + cost # potential new distance 
-        if nd < dist[ny, nx]: # if new distance is smaller then currently known distance 
+        nd = d + cost
+        if nd < dist[ny, nx]:
           dist[ny, nx] = nd
-          heapq.heappush(pq, (nd, nx, ny)) # new distance, x, y
+          heapq.heappush(pq, (nd, nx, ny))
+
+    # diagonal moves: also require both orthogonal "corner" cells to be
+    # walkable, otherwise the path would illegally cut through a blocked
+    # corner (e.g. squeezing diagonally past a wall edge at a door)
+    for dy, dx, cost in _DIAGONAL_NEIGHBORS:
+      nx, ny = x + dx, y + dy
+      if (
+        0 <= nx < W and 0 <= ny < H and walkable[ny, nx]
+        and walkable[y, nx] and walkable[ny, x]
+      ):
+        nd = d + cost
+        if nd < dist[ny, nx]:
+          dist[ny, nx] = nd
+          heapq.heappush(pq, (nd, nx, ny))
 
   return float("inf")  # no path found
 
