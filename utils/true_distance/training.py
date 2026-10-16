@@ -35,11 +35,20 @@ from utils.true_distance.models.xgboost_model import (
 
 def log_experiment(rows, path="experiment_log.csv"):
   """
-  Create Log csv file
+  Append experiment result rows to a persistent CSV log.
+
+  Reads + rewrites the whole file instead of blindly appending text, so
+  the schema can evolve over time (e.g. a new column added later) without
+  misaligning older rows - pandas fills missing values with NaN when
+  concatenating frames with different columns.
   """
   new_df = pd.DataFrame(rows)
-  file_exists = os.path.exists(path)
-  new_df.to_csv(path, mode="a", header=not file_exists, index=False)
+  if os.path.exists(path):
+    existing_df = pd.read_csv(path)
+    combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+  else:
+    combined_df = new_df
+  combined_df.to_csv(path, index=False)
 
 
 def train_and_compare_models(
@@ -118,6 +127,10 @@ def train_and_compare_models(
   for row in results:
     row["timestamp"] = timestamp
     row["dataset_size"] = dataset_size if dataset_size is not None else len(X)
+    row["n_trials"] = n_trials
+    row["device"] = device
+    row["n_jobs"] = n_jobs
+    row["seed"] = seed
     row["params"] = json.dumps(row["params"])
 
   return pd.DataFrame(results)

@@ -38,7 +38,7 @@ def test_train_and_compare_models_has_expected_columns(tmp_path):
 
   expected_cols = {
     "model", "params", "model_path", "MAE", "MSE", "R2", "Pearson",
-    "Spearman", "timestamp", "dataset_size",
+    "Spearman", "timestamp", "dataset_size", "n_trials", "device", "n_jobs", "seed",
   }
   assert expected_cols.issubset(set(results.columns))
 
