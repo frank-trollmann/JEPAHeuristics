@@ -227,6 +227,4 @@ __marimo__/
 # environment
 environment
 
-/data
-
 experiment_log.csv
