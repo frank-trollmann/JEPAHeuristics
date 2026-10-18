@@ -16,11 +16,18 @@ def _synthetic_data(n=100, dim=5, seed=0):
   return X, y
 
 
-def test_torch_mlp_output_shape():
+def test_torch_mlp_output_shape_defaults_to_single_output():
   model = TorchMLP(input_dim=5, hidden_dims=(8, 4))
   x = torch.randn(10, 5)
   out = model(x)
   assert out.shape == (10,)
+
+
+def test_torch_mlp_output_shape_multioutput():
+  model = TorchMLP(input_dim=5, hidden_dims=(8, 4), output_dim=2)
+  x = torch.randn(10, 5)
+  out = model(x)
+  assert out.shape == (10, 2)
 
 
 def test_train_torch_mlp_returns_model_and_val_mae():
