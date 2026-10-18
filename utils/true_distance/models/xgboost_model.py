@@ -1,5 +1,9 @@
+import json
+
+import numpy as np
 import optuna
 from sklearn.metrics import mean_absolute_error
+from sklearn.multioutput import MultiOutputRegressor
 from xgboost import XGBRegressor
 
 
@@ -14,6 +18,10 @@ def train_xgboost(X_train, y_train, params=None, device="cpu", random_state=42):
     random_state=random_state,
     **params,
   )
+  y_train = np.asarray(y_train)
+  # for multi output, wrap model in MultiOutputRegressor (independant Regressor per output column)
+  if y_train.ndim > 1: 
+    model = MultiOutputRegressor(model)
   model.fit(X_train, y_train)
   return model
 
@@ -48,10 +56,36 @@ def tune_xgboost(X_train, y_train, X_val, y_val, n_trials=50, device="cpu", rand
 
 
 def save_xgboost(model, path):
-  model.save_model(path)
+  """
+  Save a fitted model to disk.
+  MultiOutputRegressor has no native .save_model()
+  """
+  if isinstance(model, MultiOutputRegressor):
+    manifest = {"multi_output": True, "n_outputs": len(model.estimators_)}
+    for i, estimator in enumerate(model.estimators_):
+      estimator.save_model(f"{path}.output{i}.json")
+  else:
+    manifest = {"multi_output": False}
+    model.save_model(path)
+
+  with open(f"{path}.manifest.json", "w") as f:
+    json.dump(manifest, f)
 
 
 def load_xgboost(path, device="cpu"):
+  with open(f"{path}.manifest.json") as f:
+    manifest = json.load(f)
+
+  if manifest["multi_output"]:
+    model = MultiOutputRegressor(XGBRegressor(device=device))
+    estimators = []
+    for i in range(manifest["n_outputs"]):
+      estimator = XGBRegressor(device=device)
+      estimator.load_model(f"{path}.output{i}.json")
+      estimators.append(estimator)
+    model.estimators_ = estimators
+    return model
+
   model = XGBRegressor(device=device)
   model.load_model(path)
   return model

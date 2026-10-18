@@ -7,7 +7,7 @@ class TorchMLP(nn.Module):
   One hidden layer consists of 4 Layer 
   """
 
-  def __init__(self, input_dim, hidden_dims, dropout=0.1):
+  def __init__(self, input_dim, hidden_dims, output_dim=1, dropout=0.1):
     super().__init__()
     layers = []
     prev_dim = input_dim
@@ -17,7 +17,7 @@ class TorchMLP(nn.Module):
       layers.append(nn.ReLU())
       layers.append(nn.Dropout(dropout))
       prev_dim = hidden_dim
-    layers.append(nn.Linear(prev_dim, 1))
+    layers.append(nn.Linear(prev_dim, output_dim))
     self.net = nn.Sequential(*layers)
 
   def forward(self, x):

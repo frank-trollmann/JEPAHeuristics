@@ -16,6 +16,16 @@ def _synthetic_data(n=150, dim=6, seed=0):
   return X, y
 
 
+def _synthetic_multioutput_data(n=150, dim=6, seed=0):
+  rng = np.random.default_rng(seed)
+  X = rng.normal(size=(n, dim)).astype(np.float32)
+  y = np.stack([
+    X.sum(axis=1) * 10 + rng.normal(scale=0.1, size=n),
+    X[:, 0] * 5 + rng.normal(scale=0.1, size=n),
+  ], axis=1).astype(np.float32)
+  return X, y
+
+
 def test_train_and_compare_models_returns_one_row_per_model(tmp_path):
   X, y = _synthetic_data()
   models_dir = tmp_path / "models"
@@ -68,6 +78,28 @@ def test_train_and_compare_models_records_dataset_size(tmp_path):
   )
 
   assert (results["dataset_size"] == 150).all()
+
+
+def test_train_and_compare_models_works_with_multioutput_y(tmp_path):
+  X, y = _synthetic_multioutput_data()
+  models_dir = tmp_path / "models"
+
+  results = train_and_compare_models(
+    X, y, n_trials=2, device="cpu", models_dir=str(models_dir), seed=0
+  )
+
+  assert len(results) == 4
+  assert set(results["model"]) == {"Linear Regression", "Random Forest", "XGBoost", "MLP"}
+  # metrics must be plain scalars (averaged across the 2 output columns), not NaN/arrays
+  assert results["Pearson"].notna().all()
+  assert results["MAE"].apply(np.isscalar).all()
+
+  for _, row in results.iterrows():
+    if row["model"] == "MLP":
+      assert os.path.exists(row["model_path"] + ".pt")
+      assert os.path.exists(row["model_path"] + ".json")
+    else:
+      assert os.path.exists(row["model_path"]) or os.path.exists(row["model_path"] + ".manifest.json")
 
 
 def test_subsample_returns_full_data_when_none():

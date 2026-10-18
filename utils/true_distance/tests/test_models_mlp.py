@@ -16,11 +16,28 @@ def _synthetic_data(n=100, dim=5, seed=0):
   return X, y
 
 
-def test_torch_mlp_output_shape():
+def _synthetic_multioutput_data(n=100, dim=5, seed=0):
+  rng = np.random.default_rng(seed)
+  X = rng.normal(size=(n, dim)).astype(np.float32)
+  y = np.stack([
+    X.sum(axis=1) * 10 + rng.normal(scale=0.1, size=n),
+    X[:, 0] * 5 + rng.normal(scale=0.1, size=n),
+  ], axis=1).astype(np.float32)
+  return X, y
+
+
+def test_torch_mlp_output_shape_defaults_to_single_output():
   model = TorchMLP(input_dim=5, hidden_dims=(8, 4))
   x = torch.randn(10, 5)
   out = model(x)
   assert out.shape == (10,)
+
+
+def test_torch_mlp_output_shape_multioutput():
+  model = TorchMLP(input_dim=5, hidden_dims=(8, 4), output_dim=2)
+  x = torch.randn(10, 5)
+  out = model(x)
+  assert out.shape == (10, 2)
 
 
 def test_train_torch_mlp_returns_model_and_val_mae():
@@ -51,6 +68,20 @@ def test_train_torch_mlp_learns_something_on_easy_data():
   # a trained model should clearly beat predicting zero/noise
   naive_mae = np.mean(np.abs(y_val))
   assert best_val_mae < naive_mae
+
+
+def test_train_torch_mlp_infers_output_dim_from_multioutput_y():
+  X_train, y_train = _synthetic_multioutput_data(n=80, seed=1)
+  X_val, y_val = _synthetic_multioutput_data(n=20, seed=2)
+
+  model, best_val_mae = train_torch_mlp(
+    X_train, y_train, X_val, y_val,
+    hidden_dims=(16, 8), max_epochs=20, patience=5, device="cpu",
+  )
+
+  assert model.net[-1].out_features == 2
+  y_pred = predict_torch_mlp(model, X_val, device="cpu")
+  assert y_pred.shape == (20, 2)
 
 
 def test_predict_torch_mlp_matches_model_output_shape():

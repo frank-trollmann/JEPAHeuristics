@@ -139,6 +139,7 @@ def train_and_compare_models(
     model, path,
     input_dim=X.shape[1],
     hidden_dims=mlp_kwargs["hidden_dims"],
+    output_dim=y.shape[1] if y.ndim > 1 else 1,
     dropout=mlp_kwargs["dropout"],
   )
   results.append({"model": "MLP", "params": best_params, "model_path": path, **metrics})
