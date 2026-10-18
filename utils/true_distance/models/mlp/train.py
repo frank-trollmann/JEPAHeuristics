@@ -35,8 +35,11 @@ def train_torch_mlp(
     TensorDataset(X_train_t, y_train_t), batch_size=batch_size, shuffle=True
   )
 
+# dynamicaly extract y output dimensions
+  output_dim = y_train.shape[1] if y_train.ndim > 1 else 1
+
   model = TorchMLP(
-    input_dim=X_train.shape[1], hidden_dims=hidden_dims, dropout=dropout
+    input_dim=X_train.shape[1], hidden_dims=hidden_dims, output_dim=output_dim, dropout=dropout
   ).to(device)
   optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
   loss_fn = nn.L1Loss()  # MAE loss
