@@ -1,5 +1,7 @@
+import numpy as np
 import optuna
 from sklearn.metrics import mean_absolute_error
+from sklearn.multioutput import MultiOutputRegressor
 from xgboost import XGBRegressor
 
 
@@ -14,6 +16,10 @@ def train_xgboost(X_train, y_train, params=None, device="cpu", random_state=42):
     random_state=random_state,
     **params,
   )
+  y_train = np.asarray(y_train)
+  # for multi output, wrap model in MultiOutputRegressor (independant Regressor per output column)
+  if y_train.ndim > 1: 
+    model = MultiOutputRegressor(model)
   model.fit(X_train, y_train)
   return model
 

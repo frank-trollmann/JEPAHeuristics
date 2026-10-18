@@ -1,5 +1,6 @@
 import numpy as np
 import optuna
+from sklearn.multioutput import MultiOutputRegressor
 from xgboost import XGBRegressor
 
 from utils.true_distance.models.xgboost_model import (
@@ -16,6 +17,16 @@ def _synthetic_data(n=100, dim=5, seed=0):
   rng = np.random.default_rng(seed)
   X = rng.normal(size=(n, dim))
   y = X.sum(axis=1) * 10 + rng.normal(scale=0.1, size=n)
+  return X, y
+
+
+def _synthetic_multioutput_data(n=100, dim=5, seed=0):
+  rng = np.random.default_rng(seed)
+  X = rng.normal(size=(n, dim))
+  y = np.stack([
+    X.sum(axis=1) * 10 + rng.normal(scale=0.1, size=n),
+    X[:, 0] * 5 + rng.normal(scale=0.1, size=n),
+  ], axis=1)
   return X, y
 
 
@@ -37,6 +48,19 @@ def test_train_xgboost_defaults_to_cpu_device():
   X, y = _synthetic_data()
   model = train_xgboost(X, y)
   assert model.device == "cpu"
+
+
+def test_train_xgboost_wraps_multioutput_y_in_multioutputregressor():
+  X, y = _synthetic_multioutput_data()
+  model = train_xgboost(X, y, device="cpu")
+  assert isinstance(model, MultiOutputRegressor)
+  assert model.predict(X).shape == (len(y), 2)
+
+
+def test_train_xgboost_stays_plain_regressor_for_single_output_y():
+  X, y = _synthetic_data()
+  model = train_xgboost(X, y, device="cpu")
+  assert isinstance(model, XGBRegressor)
 
 
 def test_tune_xgboost_returns_valid_params_and_study():
