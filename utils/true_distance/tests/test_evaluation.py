@@ -56,6 +56,28 @@ def test_evaluate_model_uses_predict_by_default():
   assert metrics["MAE"] == pytest.approx(0.0)
 
 
+def test_evaluate_predictions_multioutput_perfect_match():
+  y = np.array([[10.0, 1.0], [20.0, 2.0], [30.0, 3.0], [40.0, 4.0]])
+  metrics = evaluate_predictions(y, y)
+
+  assert metrics["MAE"] == pytest.approx(0.0)
+  assert metrics["R2"] == pytest.approx(1.0)
+  assert metrics["Pearson"] == pytest.approx(1.0)
+  assert metrics["Spearman"] == pytest.approx(1.0)
+
+
+def test_evaluate_predictions_multioutput_averages_per_column_correlation():
+  # column 0: perfectly correlated, column 1: perfectly anti-correlated
+  y_true = np.array([[1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0]])
+  y_pred = np.array([[1.0, 4.0], [2.0, 3.0], [3.0, 2.0], [4.0, 1.0]])
+
+  metrics = evaluate_predictions(y_true, y_pred)
+
+  # mean(1.0, -1.0) == 0.0
+  assert metrics["Pearson"] == pytest.approx(0.0)
+  assert metrics["Spearman"] == pytest.approx(0.0)
+
+
 def test_evaluate_model_uses_custom_predict_fn():
   model = object()  # doesn't even need .predict, since we override it
   X_test = np.array([[1.0], [2.0], [3.0]])

@@ -3,6 +3,17 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from scipy.stats import pearsonr, spearmanr
 
 
+def _mean_correlation(y_true, y_pred, corr_fn):
+  """
+  pearsonr/spearmanr only accept 1D arrays. For multi-output y (x, y),
+  compute the correlation per output column and average
+  """
+  if y_true.ndim == 1:
+    return corr_fn(y_true, y_pred)[0]
+  per_column = [corr_fn(y_true[:, i], y_pred[:, i])[0] for i in range(y_true.shape[1])]
+  return float(np.mean(per_column))
+
+
 def evaluate_predictions(y_true, y_pred):
   """
   Compute MAE, MSE, R2, Pearson, Spearman between true and predicted values.
@@ -15,8 +26,8 @@ def evaluate_predictions(y_true, y_pred):
     "MAE": mean_absolute_error(y_true, y_pred),
     "MSE": mean_squared_error(y_true, y_pred),
     "R2": r2_score(y_true, y_pred),
-    "Pearson": pearsonr(y_true, y_pred)[0],
-    "Spearman": spearmanr(y_true, y_pred)[0],
+    "Pearson": _mean_correlation(y_true, y_pred, pearsonr),
+    "Spearman": _mean_correlation(y_true, y_pred, spearmanr),
   }
 
 
