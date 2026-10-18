@@ -100,3 +100,15 @@ def test_save_and_load_xgboost_roundtrip(tmp_path):
 
   assert isinstance(loaded, XGBRegressor)
   np.testing.assert_allclose(loaded.predict(X), model.predict(X))
+
+
+def test_save_and_load_xgboost_roundtrip_multioutput(tmp_path):
+  X, y = _synthetic_multioutput_data()
+  model = train_xgboost(X, y, params={"n_estimators": 5}, device="cpu")
+
+  path = str(tmp_path / "xgboost_model.json")
+  save_xgboost(model, path)
+  loaded = load_xgboost(path, device="cpu")
+
+  assert isinstance(loaded, MultiOutputRegressor)
+  np.testing.assert_allclose(loaded.predict(X), model.predict(X))
