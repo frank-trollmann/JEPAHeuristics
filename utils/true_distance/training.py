@@ -33,6 +33,18 @@ from utils.true_distance.models.xgboost_model import (
 )
 
 
+def _subsample(X, y, sample_size, seed):
+  """
+  Randomly subsample (X, y) down to `sample_size` rows, without replacement.
+  Returns the full (X, y) unchanged if sample_size is None or already >= len(X).
+  """
+  if sample_size is None or sample_size >= len(X):
+    return X, y
+  rng = np.random.default_rng(seed)
+  idx = rng.choice(len(X), size=sample_size, replace=False)
+  return X[idx], y[idx]
+
+
 def log_experiment(rows, path="experiment_log.csv"):
   """
   Append experiment result rows to a persistent CSV log.
@@ -60,11 +72,17 @@ def train_and_compare_models(
   models_dir="models",
   seed=42,
   n_jobs=None,
+  tuning_sample_size=None,
 ):
   """
   Full pipeline: split -> tune each model on Train/Val -> final fit on
   Train -> evaluate once on held-out Test -> save each model -> return a
   results DataFrame (one row per model, also writable via log_experiment).
+
+  tuning_sample_size: if set, each Optuna trial trains on a random subset of
+  this many Train rows instead of the full Train set - keeps tuning cost
+  roughly constant regardless of dataset size (useful at e.g. 1M samples).
+  The final fit after tuning always uses the FULL Train set regardless.
   """
   os.makedirs(models_dir, exist_ok=True)
   timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -72,6 +90,7 @@ def train_and_compare_models(
   X_train, X_val, X_test, y_train, y_val, y_test = split_dataset(
     X, y, random_state=seed
   )
+  X_tune, y_tune = _subsample(X_train, y_train, tuning_sample_size, seed)
 
   results = []
 
@@ -84,7 +103,7 @@ def train_and_compare_models(
 
   # --- Random Forest ---
   best_params, _ = tune_random_forest(
-    X_train, y_train, X_val, y_val, n_trials=n_trials, random_state=seed, seed=seed, n_jobs=n_jobs
+    X_tune, y_tune, X_val, y_val, n_trials=n_trials, random_state=seed, seed=seed, n_jobs=n_jobs
   )
   model = train_random_forest(X_train, y_train, params=best_params, random_state=seed, n_jobs=n_jobs)
   metrics = evaluate_model(model, X_test, y_test)
@@ -94,7 +113,7 @@ def train_and_compare_models(
 
   # --- XGBoost ---
   best_params, _ = tune_xgboost(
-    X_train, y_train, X_val, y_val,
+    X_tune, y_tune, X_val, y_val,
     n_trials=n_trials, device=device, random_state=seed, seed=seed,
   )
   model = train_xgboost(X_train, y_train, params=best_params, device=device, random_state=seed)
@@ -105,7 +124,7 @@ def train_and_compare_models(
 
   # --- MLP ---
   best_params, _ = tune_mlp(
-    X_train, y_train, X_val, y_val, n_trials=n_trials, device=device, seed=seed
+    X_tune, y_tune, X_val, y_val, n_trials=n_trials, device=device, seed=seed
   )
   mlp_kwargs = mlp_params_to_kwargs(best_params)
   model, _ = train_torch_mlp(
@@ -131,6 +150,7 @@ def train_and_compare_models(
     row["device"] = device
     row["n_jobs"] = n_jobs
     row["seed"] = seed
+    row["tuning_sample_size"] = tuning_sample_size if tuning_sample_size is not None else len(X_train)
     row["params"] = json.dumps(row["params"])
 
   return pd.DataFrame(results)

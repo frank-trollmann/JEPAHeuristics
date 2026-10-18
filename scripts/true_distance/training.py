@@ -4,7 +4,7 @@ import argparse
 import pandas as pd
 
 
-def main(dataset_path, n_trials, device, models_dir, log_path, seed, n_jobs):
+def main(dataset_path, n_trials, device, models_dir, log_path, seed, n_jobs, tuning_sample_size):
     dataset = pd.read_pickle(dataset_path)
     X, y = heuristic_dataset_to_xy(dataset)
 
@@ -16,6 +16,7 @@ def main(dataset_path, n_trials, device, models_dir, log_path, seed, n_jobs):
         models_dir=models_dir,
         seed=seed,
         n_jobs=n_jobs,
+        tuning_sample_size=tuning_sample_size,
     )
 
     log_experiment(results.to_dict("records"), path=log_path)
@@ -80,6 +81,16 @@ if __name__ == "__main__":
              "Safe default of 1 core - pass a higher number explicitly on a shared machine with headroom.",
     )
 
+    parser.add_argument(
+        "--tuning_sample_size",
+        type=int,
+        default=None,
+        help="If set, each Optuna trial trains on a random subset of this many "
+             "Train rows instead of the full Train set - keeps tuning cost roughly "
+             "constant regardless of dataset size (useful at e.g. 1M samples). "
+             "The final fit after tuning always uses the full Train set.",
+    )
+
     args = parser.parse_args()
 
     main(
@@ -90,4 +101,5 @@ if __name__ == "__main__":
         log_path=args.log_path,
         seed=args.seed,
         n_jobs=args.n_jobs,
+        tuning_sample_size=args.tuning_sample_size,
     )
