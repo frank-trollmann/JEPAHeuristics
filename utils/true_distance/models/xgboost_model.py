@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import optuna
 from sklearn.metrics import mean_absolute_error
@@ -54,10 +56,36 @@ def tune_xgboost(X_train, y_train, X_val, y_val, n_trials=50, device="cpu", rand
 
 
 def save_xgboost(model, path):
-  model.save_model(path)
+  """
+  Save a fitted model to disk.
+  MultiOutputRegressor has no native .save_model()
+  """
+  if isinstance(model, MultiOutputRegressor):
+    manifest = {"multi_output": True, "n_outputs": len(model.estimators_)}
+    for i, estimator in enumerate(model.estimators_):
+      estimator.save_model(f"{path}.output{i}.json")
+  else:
+    manifest = {"multi_output": False}
+    model.save_model(path)
+
+  with open(f"{path}.manifest.json", "w") as f:
+    json.dump(manifest, f)
 
 
 def load_xgboost(path, device="cpu"):
+  with open(f"{path}.manifest.json") as f:
+    manifest = json.load(f)
+
+  if manifest["multi_output"]:
+    model = MultiOutputRegressor(XGBRegressor(device=device))
+    estimators = []
+    for i in range(manifest["n_outputs"]):
+      estimator = XGBRegressor(device=device)
+      estimator.load_model(f"{path}.output{i}.json")
+      estimators.append(estimator)
+    model.estimators_ = estimators
+    return model
+
   model = XGBRegressor(device=device)
   model.load_model(path)
   return model
