@@ -12,18 +12,18 @@ import os
 
 def _to_cupy(data):
     """
-    Konvertiert cuDF/pandas/numpy-Daten in ein cupy-Array (GPU).
+    Converts cuDF/pandas/numpy data into a cupy array (GPU).
     """
     if hasattr(data, "to_cupy"):
         return data.to_cupy()
-    if hasattr(data, "get"):  # bereits ein cupy-Array
+    if hasattr(data, "get"):  # already a cupy array
         return data
     return np.asarray(data)
 
 
 def _to_numpy(data):
     """
-    Konvertiert cuDF/cupy/pandas-Daten in ein numpy-Array (CPU).
+    Converts cuDF/cupy/pandas data into a numpy array (CPU).
     """
     if hasattr(data, "to_numpy"):  # cudf.Series / pandas.Series
         return data.to_numpy()
@@ -34,12 +34,12 @@ def _to_numpy(data):
 
 def _to_torch_tensor(data, dtype=torch.float32, device="cuda"):
     """
-    Konvertiert cuDF/cupy/pandas-Daten verlustfrei per DLPack in einen Torch-Tensor.
+    Converts cuDF/cupy/pandas data into a torch tensor losslessly via DLPack.
 
-    torch.as_tensor() kann kein cupy-Array verarbeiten (nur NumPy/Tensor),
-    deshalb geht der Weg ueber DLPack, der zusaetzlich keinen Host-Copy erzwingt.
+    torch.as_tensor() cannot handle cupy arrays (NumPy/tensors only),
+    so we go through DLPack, which additionally avoids a host copy.
     """
-    # torch-dtype -> numpy-dtype (fuer astype/vergleiche)
+    # torch dtype -> numpy dtype (for astype/comparisons)
     np_dtype = torch.empty(0, dtype=dtype).numpy().dtype
 
     array = _to_cupy(data)
@@ -47,16 +47,16 @@ def _to_torch_tensor(data, dtype=torch.float32, device="cuda"):
     if array.dtype != np_dtype:
         array = array.astype(np_dtype)
 
-    # DLPack verlangt zusammenhaengenden Speicher
+    # DLPack requires contiguous memory
     if not array.flags.c_contiguous:
         import cupy
         array = cupy.ascontiguousarray(array)
 
     try:
-        # bevorzugt das DLPack-Protokoll (zero-copy, ohne Host-Umweg)
+        # prefer the DLPack protocol (zero-copy, no host round-trip)
         tensor = torch.from_dlpack(array)
     except (AttributeError, RuntimeError, TypeError):
-        # Aeltere CuPy-Versionen ohne __dlpack__: Legacy-Capsule
+        # older CuPy versions without __dlpack__: legacy capsule
         tensor = torch.utils.dlpack.from_dlpack(array.toDlpack())
 
     return tensor.to(device)
@@ -150,7 +150,7 @@ def train_gpu_mlp(X, y, hidden_layers=(64, 32), epochs=100, batch_size=1024, lr=
     Trains a Multi-Layer Perceptron using PyTorch on GPU.
     Handles the conversion from cuDF to Torch Tensors.
     """
-    # Convert cuDF/cupy to Torch (ueber DLPack, torch.as_tensor kann kein cupy-Array)
+    # Convert cuDF/cupy to Torch (via DLPack, torch.as_tensor cannot handle cupy arrays)
     X_torch = _to_torch_tensor(X, dtype=torch.float32)
     y_torch = _to_torch_tensor(y, dtype=torch.float32).view(-1, 1)
 
@@ -197,7 +197,7 @@ def evaluate_gpu_model(model, X_test, y_test, model_type='cuml'):
             X_t = _to_torch_tensor(X_test, dtype=torch.float32)
             y_pred = model(X_t).cpu().numpy().flatten()
 
-    # cuML liefert cupy-Arrays, sklearn-Metriken brauchen echte numpy-Arrays
+    # cuML returns cupy arrays, sklearn metrics need real numpy arrays
     y_pred_np = _to_numpy(y_pred)
     y_test_np = _to_numpy(y_test)
     
