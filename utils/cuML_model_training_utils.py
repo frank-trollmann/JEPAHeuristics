@@ -2,7 +2,6 @@ import polars as pl
 import pandas as pd
 import numpy as np
 import torch
-import torch.utils.dlpack
 from cuml.linear_model import LinearRegression as GPULinearRegression
 from cuml.ensemble import RandomForestRegressor as GPURandomForest
 from datetime import datetime
@@ -10,9 +9,11 @@ import json
 import os
 
 
-def _to_cupy(data):
+def _to_array(data):
     """
-    Converts cuDF/pandas/numpy data into a cupy array (GPU).
+    Returns the data as a cupy array where possible (cuDF), otherwise as a
+    numpy array (pandas/numpy). The name deliberately does not promise cupy:
+    for CPU inputs nothing is moved to the GPU.
     """
     if hasattr(data, "to_cupy"):
         return data.to_cupy()
@@ -32,6 +33,14 @@ def _to_numpy(data):
     return np.asarray(data)
 
 
+_NP_DTYPES = {
+    torch.float32: np.float32,
+    torch.float64: np.float64,
+    torch.int64: np.int64,
+    torch.int32: np.int32,
+}
+
+
 def _to_torch_tensor(data, dtype=torch.float32, device="cuda"):
     """
     Converts cuDF/cupy/pandas data into a torch tensor losslessly via DLPack.
@@ -40,26 +49,28 @@ def _to_torch_tensor(data, dtype=torch.float32, device="cuda"):
     so we go through DLPack, which additionally avoids a host copy.
     """
     # torch dtype -> numpy dtype (for astype/comparisons)
-    np_dtype = torch.empty(0, dtype=dtype).numpy().dtype
+    np_dtype = _NP_DTYPES.get(dtype)
+    if np_dtype is None:
+        np_dtype = torch.empty(0, dtype=dtype).numpy().dtype
 
-    array = _to_cupy(data)
+    array = _to_array(data)
 
     if array.dtype != np_dtype:
         array = array.astype(np_dtype)
 
-    # DLPack requires contiguous memory
+    # DLPack requires contiguous memory (works for numpy and cupy alike)
     if not array.flags.c_contiguous:
-        import cupy
-        array = cupy.ascontiguousarray(array)
+        array = array.copy(order="C")
 
-    try:
-        # prefer the DLPack protocol (zero-copy, no host round-trip)
-        tensor = torch.from_dlpack(array)
-    except (AttributeError, RuntimeError, TypeError):
-        # older CuPy versions without __dlpack__: legacy capsule
-        tensor = torch.utils.dlpack.from_dlpack(array.toDlpack())
+    # zero-copy: the returned tensor shares memory with `array`
+    tensor = torch.from_dlpack(array)
 
-    return tensor.to(device)
+    target = torch.device(device)
+    if target.type == "cuda" and target.index is None:
+        # plain "cuda" means "current device" - keep data where it already is
+        return tensor if tensor.is_cuda else tensor.to(target)
+
+    return tensor if tensor.device == target else tensor.to(target)
 
 def split_gpu_data(df, target_col='heuristic', train_size=0.8, random_state=None):
     """
@@ -74,12 +85,10 @@ def split_gpu_data(df, target_col='heuristic', train_size=0.8, random_state=None
     Returns:
         x_train, x_test, y_train, y_test as cuDF objects.
    """
-    # Reset the index: .loc with a shuffled label array breaks on duplicate labels
-    df = df.reset_index(drop=True)
-
-    # cuDF doesn't have a direct train_test_split like sklearn,
-    # so we shuffle the frame and slice by position.
-    shuffled = df.sample(frac=1, random_state=random_state).reset_index(drop=True)
+    # Only positional access (.iloc) is used below, so no index reset is needed.
+    # The single required copy is the shuffle; the slices and drop() are views
+    # in cuDF and share the underlying buffers.
+    shuffled = df.sample(frac=1, random_state=random_state)
 
     split_idx = int(len(shuffled) * train_size)
     train_df = shuffled.iloc[:split_idx]
@@ -114,6 +123,7 @@ def convert_pickle_to_parquet(pickle_path: str) -> str:
 
   # 2. Convert to Polars for efficient casting and writing
   df = pl.DataFrame(df_pandas)
+  del df_pandas  # avoid holding both copies in host RAM
 
   # 3. Optimize: Cast all float64 to float32 to save 50% space and speed up GPU loading
   # We use a direct expression without the list to avoid some Linter confusion
@@ -171,8 +181,8 @@ def train_gpu_mlp(X, y, hidden_layers=(64, 32), epochs=100, batch_size=1024, lr=
     # Mini-batch training loop for memory efficiency with 10^7 points
     model.train()
     for epoch in range(epochs):
-        # Simple shuffling and batching
-        permutation = torch.randperm(X_torch.size(0))
+        # Simple shuffling and batching (indices stay on the GPU)
+        permutation = torch.randperm(X_torch.size(0), device=X_torch.device)
         for i in range(0, X_torch.size(0), batch_size):
             indices = permutation[i:i+batch_size]
             batch_x, batch_y = X_torch[indices], y_torch[indices]
@@ -185,17 +195,28 @@ def train_gpu_mlp(X, y, hidden_layers=(64, 32), epochs=100, batch_size=1024, lr=
             
     return model
 
-def evaluate_gpu_model(model, X_test, y_test, model_type='cuml'):
+def evaluate_gpu_model(model, X_test, y_test, model_type='cuml', batch_size=4096):
     """
     Evaluates a model and returns standard metrics.
+
+    PyTorch models are evaluated in batches so the whole test split is never
+    materialised twice in VRAM.
     """
     if model_type == 'cuml':
         y_pred = model.predict(X_test)
     else: # PyTorch
         model.eval()
+        device = next(model.parameters()).device
+        preds = []
         with torch.no_grad():
-            X_t = _to_torch_tensor(X_test, dtype=torch.float32)
-            y_pred = model(X_t).cpu().numpy().flatten()
+            for start in range(0, len(X_test), batch_size):
+                batch_x = _to_torch_tensor(
+                    X_test.iloc[start:start + batch_size],
+                    dtype=torch.float32,
+                    device=device,
+                )
+                preds.append(model(batch_x).squeeze(1))
+        y_pred = torch.cat(preds).cpu().numpy()
 
     # cuML returns cupy arrays, sklearn metrics need real numpy arrays
     y_pred_np = _to_numpy(y_pred)
@@ -210,12 +231,12 @@ def evaluate_gpu_model(model, X_test, y_test, model_type='cuml'):
         "R2": float(r2_score(y_test_np, y_pred_np))
     }
 
-    # Save results to /data/MLresults
+    # Save results to data/MLresults (relative to the working directory)
     results_dir = "data/MLresults"
     os.makedirs(results_dir, exist_ok=True)
     
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    model_name = model.__class__.__name__ if hasattr(model, '__class__') else 'model'
+    model_name = type(model).__name__
     filename = f"{timestamp}_{model_name}_results.json"
     save_path = os.path.join(results_dir, filename)
 

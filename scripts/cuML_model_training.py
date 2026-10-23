@@ -1,4 +1,5 @@
 import argparse
+import os
 import cudf
 from utils.cuML_model_training_utils import (
     convert_pickle_to_parquet,
@@ -49,8 +50,12 @@ def main():
 
     # 1. Convert Pickle to Parquet (if not already done)
     # This ensures we use float32 and optimized storage
-    parquet_path = convert_pickle_to_parquet(args.input)
-    print(f"Data converted and saved to: {parquet_path}")
+    parquet_path = args.input.replace(".pkl", ".parquet")
+    if os.path.exists(parquet_path):
+        print(f"Using existing parquet file: {parquet_path}")
+    else:
+        parquet_path = convert_pickle_to_parquet(args.input)
+        print(f"Data converted and saved to: {parquet_path}")
 
     # 2. Load Data into VRAM via cuDF
     print("Loading data into GPU memory...")
@@ -63,6 +68,8 @@ def main():
         target_col='heuristic', 
         train_size=args.train_size
     )
+    # x_train/x_test are views on the shuffled frame, so df_gpu is dead weight
+    del df_gpu
     print(f"Train size: {len(x_train)}, Test size: {len(x_test)}")
 
     # 4. Model Training & Evaluation
