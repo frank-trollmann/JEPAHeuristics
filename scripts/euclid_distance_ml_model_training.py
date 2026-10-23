@@ -59,6 +59,11 @@ def main():
         type=int, default=None,
         help="Optional seed for a reproducible train/test split"
     )
+    parser.add_argument(
+        "--xgb_max_rows",
+        type=int, default=0,
+        help="Train XGBoost on at most N randomly sampled rows (0 = all rows)"
+    )
 
     args = parser.parse_args()
 
@@ -105,7 +110,9 @@ def main():
 
     if args.model in ["xgb", "all"]:
         print("\nTraining XGBoost...")
-        model_xgb = train_xgboost(x_train, y_train, device=device)
+        model_xgb = train_xgboost(
+            x_train, y_train, device=device, max_rows=args.xgb_max_rows
+        )
         results_summary["XGBoost"] = evaluate_model(
             model_xgb, x_test, y_test, batch_size=args.batch_size
         )
@@ -128,7 +135,10 @@ def main():
     print("FINAL SUMMARY")
     print("=" * 30)
     for model, metrics in results_summary.items():
-        print(f"{model}: MAE={metrics['MAE']:.4f}, R2={metrics['R2']:.4f}")
+        print(
+            f"{model}: MAE={metrics['MAE']:.4f}, R2={metrics['R2']:.4f}, "
+            f"Pearson={metrics['Pearson']:.4f}, Spearman={metrics['Spearman']:.4f}"
+        )
 
 
 if __name__ == "__main__":

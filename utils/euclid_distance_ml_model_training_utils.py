@@ -153,16 +153,28 @@ class LinearRegressor:
 
 
 def train_xgboost(X, y, n_estimators: int = 500, max_depth: int = 6,
-                  learning_rate: float = 0.1, device: str = "cuda"):
+                  learning_rate: float = 0.1, device: str = "cuda",
+                  max_rows: int = 0):
     """
     Gradient boosted trees on the GPU (XGBoost `tree_method="hist"`).
 
     XGBoost takes host/NumPy input here, so the training matrix is copied back
     once; prediction happens on the GPU.
+
+    `max_rows > 0` trains on a random subset. Tree models plateau early, and
+    for multi-million row datasets the host copy of X is by far the largest
+    allocation of the whole pipeline.
     """
     # On macOS, torch and xgboost ship two libomp runtimes; spawning more than
     # one OpenMP thread then crashes with "OMP: Error #179". Linux is unaffected.
     n_jobs = 1 if sys.platform == "darwin" else -1
+
+    num_rows = X.shape[0]
+    if 0 < max_rows < num_rows:
+        print(f"XGBoost: training on a random subset of {max_rows:,} "
+              f"of {num_rows:,} rows")
+        subset = torch.randperm(num_rows, device=X.device)[:max_rows]
+        X, y = X[subset], y[subset]
 
     model = xgb.XGBRegressor(
         n_estimators=n_estimators,
@@ -258,9 +270,35 @@ def predict(model, X, batch_size: int = 8192) -> torch.Tensor:
     return torch.as_tensor(pred, device=X.device, dtype=torch.float32).reshape(-1)
 
 
+def _rank(values: torch.Tensor) -> torch.Tensor:
+    """0-based ranks (ties keep their arbitrary order, values are continuous)."""
+    order = torch.argsort(values)
+    ranks = torch.empty(values.numel(), dtype=torch.float64, device=values.device)
+    ranks[order] = torch.arange(values.numel(), dtype=torch.float64,
+                                device=values.device)
+    return ranks
+
+
+def _correlations(y_pred: torch.Tensor, y_true: torch.Tensor) -> dict:
+    """Pearson and Spearman correlation, computed in float64 on the device."""
+    pred = y_pred.to(torch.float64)
+    true = y_true.to(torch.float64)
+
+    def pearson(a, b):
+        a = a - a.mean()
+        b = b - b.mean()
+        denom = (a.norm() * b.norm()).clamp_min(1e-12)
+        return (a * b).sum() / denom
+
+    return {
+        "Pearson": float(pearson(pred, true)),
+        "Spearman": float(pearson(_rank(y_pred), _rank(y_true))),
+    }
+
+
 def evaluate_model(model, X_test, y_test, batch_size: int = 8192):
     """
-    Evaluates a model and returns MAE/MSE/R2 computed on the GPU.
+    Evaluates a model and returns MAE/MSE/R2 plus Pearson/Spearman.
 
     The metrics are written to data/MLresults/<timestamp>_<model>_results.json.
     """
@@ -276,6 +314,7 @@ def evaluate_model(model, X_test, y_test, batch_size: int = 8192):
         "MSE": float((error ** 2).mean()),
         "R2": float(1.0 - ss_res / ss_tot),
     }
+    results.update(_correlations(y_pred, y_true))
 
     results_dir = "data/MLresults"
     os.makedirs(results_dir, exist_ok=True)
