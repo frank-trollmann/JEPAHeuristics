@@ -108,23 +108,44 @@ def split_data(X, y, train_size: float = 0.8, seed: int | None = None):
 
 class LinearRegressor:
     """
-    Ordinary least squares solved on the GPU, with the same predict() API the
-    previous cuML model exposed.
+    Ordinary least squares solved on the GPU.
+
+    The normal equations are accumulated chunk-wise in float64 instead of
+    building one huge design matrix: no 2x copy of X and no QR/SVD workspace
+    that scales with the number of rows.
     """
 
+    def __init__(self, chunk_size: int = 131072):
+        self.chunk_size = chunk_size
+
     def fit(self, X, y):
-        ones = torch.ones(X.shape[0], 1, dtype=X.dtype, device=X.device)
-        design = torch.cat([X, ones], dim=1)
+        num_rows, num_features = X.shape
+        device = X.device
         targets = y.reshape(-1, 1)
 
-        try:
-            solution = torch.linalg.lstsq(design, targets).solution
-        except RuntimeError:
-            # CUDA's lstsq driver requires full rank; pinv uses an SVD instead
-            solution = torch.linalg.pinv(design) @ targets
+        gram = torch.zeros(num_features + 1, num_features + 1,
+                           dtype=torch.float64, device=device)
+        rhs = torch.zeros(num_features + 1, 1, dtype=torch.float64, device=device)
 
-        self.coef_ = solution[:-1].T.contiguous()  # (1, num_features)
-        self.intercept_ = solution[-1]             # (1,)
+        for start in range(0, num_rows, self.chunk_size):
+            chunk = X[start:start + self.chunk_size].to(torch.float64)
+            ones = torch.ones(chunk.shape[0], 1, dtype=torch.float64, device=device)
+            chunk = torch.cat([chunk, ones], dim=1)
+
+            gram += chunk.T @ chunk
+            rhs += chunk.T @ targets[start:start + chunk.shape[0]].to(torch.float64)
+
+        # Tiny relative jitter keeps the solve stable for collinear features
+        jitter = gram.diagonal().mean().clamp_min(1e-12) * 1e-10
+        gram += torch.eye(num_features + 1, dtype=torch.float64, device=device) * jitter
+
+        try:
+            solution = torch.linalg.solve(gram, rhs)
+        except RuntimeError:
+            solution = torch.linalg.pinv(gram) @ rhs
+
+        self.coef_ = solution[:-1].T.to(X.dtype).contiguous()  # (1, num_features)
+        self.intercept_ = solution[-1].to(X.dtype)             # (1,)
         return self
 
     def predict(self, X):
