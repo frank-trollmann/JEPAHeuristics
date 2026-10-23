@@ -8,6 +8,7 @@ from utils.euclid_distance_ml_model_training_utils import (
     convert_pickle_to_parquet,
     evaluate_model,
     load_features,
+    save_results,
     split_data,
     train_mlp,
     train_xgboost,
@@ -139,6 +140,9 @@ def main():
             f"{model}: MAE={metrics['MAE']:.4f}, R2={metrics['R2']:.4f}, "
             f"Pearson={metrics['Pearson']:.4f}, Spearman={metrics['Spearman']:.4f}"
         )
+
+    save_path = save_results(results_summary)
+    print(f"\nResults saved to: {save_path}")
 
 
 if __name__ == "__main__":

@@ -299,8 +299,6 @@ def _correlations(y_pred: torch.Tensor, y_true: torch.Tensor) -> dict:
 def evaluate_model(model, X_test, y_test, batch_size: int = 8192):
     """
     Evaluates a model and returns MAE/MSE/R2 plus Pearson/Spearman.
-
-    The metrics are written to data/MLresults/<timestamp>_<model>_results.json.
     """
     y_pred = predict(model, X_test, batch_size=batch_size)
     y_true = y_test.reshape(-1).to(y_pred.dtype)
@@ -315,13 +313,25 @@ def evaluate_model(model, X_test, y_test, batch_size: int = 8192):
         "R2": float(1.0 - ss_res / ss_tot),
     }
     results.update(_correlations(y_pred, y_true))
+    return results
 
-    results_dir = "data/MLresults"
+
+def save_results(results: dict, results_dir: str = "data/MLresults") -> str:
+    """
+    Writes the metrics of all trained models into one timestamped JSON file.
+
+    Args:
+        results: mapping of model name -> metric dict
+
+    Returns:
+        Path of the written file.
+    """
     os.makedirs(results_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = f"{timestamp}_{type(model).__name__}_results.json"
-    with open(os.path.join(results_dir, filename), "w") as f:
+    save_path = os.path.join(results_dir, f"{timestamp}_results.json")
+
+    with open(save_path, "w") as f:
         json.dump(results, f, indent=4)
 
-    return results
+    return save_path
