@@ -91,8 +91,9 @@ def test_evaluate_predictions_l2_error_is_euclidean_distance_for_multioutput():
 def test_evaluate_predictions_l2_error_catches_combined_error_mae_hides():
   # two small per-axis errors (MAE looks tiny) combine into one bigger
   # Euclidean miss that a position-prediction use case actually cares about
-  y_true = np.array([[0.0, 0.0]])
-  y_pred = np.array([[3.0, 4.0]])
+  # (pearsonr/spearmanr need >=2 samples, hence two identical rows here)
+  y_true = np.array([[0.0, 0.0], [0.0, 0.0]])
+  y_pred = np.array([[3.0, 4.0], [3.0, 4.0]])
 
   metrics = evaluate_predictions(y_true, y_pred)
 
