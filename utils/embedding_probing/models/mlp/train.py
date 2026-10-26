@@ -2,7 +2,7 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader, TensorDataset
 
-from utils.true_distance.models.mlp.model import TorchMLP
+from utils.embedding_probing.models.mlp.model import TorchMLP
 
 
 def train_torch_mlp(

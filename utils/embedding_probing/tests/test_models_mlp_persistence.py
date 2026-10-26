@@ -3,8 +3,8 @@ import json
 import numpy as np
 import torch
 
-from utils.true_distance.models.mlp.model import TorchMLP
-from utils.true_distance.models.mlp.persistence import load_torch_mlp, save_torch_mlp
+from utils.embedding_probing.models.mlp.model import TorchMLP
+from utils.embedding_probing.models.mlp.persistence import load_torch_mlp, save_torch_mlp
 
 
 def test_save_and_load_torch_mlp_roundtrip(tmp_path):

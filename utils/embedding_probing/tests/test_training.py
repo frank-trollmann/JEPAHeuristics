@@ -4,7 +4,7 @@ import numpy as np
 import optuna
 import pandas as pd
 
-from utils.true_distance.training import _subsample, log_experiment, train_and_compare_models
+from utils.embedding_probing.training import _subsample, log_experiment, train_and_compare_models
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -167,19 +167,38 @@ def test_log_experiment_creates_file_with_header(tmp_path):
   log_path = tmp_path / "experiment_log.csv"
   rows = [{"model": "Linear Regression", "MAE": 1.0}]
 
-  log_experiment(rows, path=str(log_path))
+  log_experiment(rows, experiment="true_distance", path=str(log_path))
 
   df = pd.read_csv(log_path)
-  assert list(df.columns) == ["model", "MAE"]
+  assert set(df.columns) == {"model", "MAE", "experiment"}
   assert len(df) == 1
 
 
 def test_log_experiment_appends_without_duplicating_header(tmp_path):
   log_path = tmp_path / "experiment_log.csv"
 
-  log_experiment([{"model": "Linear Regression", "MAE": 1.0}], path=str(log_path))
-  log_experiment([{"model": "Random Forest", "MAE": 0.5}], path=str(log_path))
+  log_experiment([{"model": "Linear Regression", "MAE": 1.0}], experiment="true_distance", path=str(log_path))
+  log_experiment([{"model": "Random Forest", "MAE": 0.5}], experiment="true_distance", path=str(log_path))
 
   df = pd.read_csv(log_path)
   assert len(df) == 2
   assert list(df["model"]) == ["Linear Regression", "Random Forest"]
+
+
+def test_log_experiment_stamps_each_row_with_experiment_name(tmp_path):
+  log_path = tmp_path / "experiment_log.csv"
+  rows = [{"model": "Linear Regression", "MAE": 1.0}, {"model": "Random Forest", "MAE": 0.5}]
+
+  log_experiment(rows, experiment="position_probing", path=str(log_path))
+
+  df = pd.read_csv(log_path)
+  assert (df["experiment"] == "position_probing").all()
+
+
+def test_log_experiment_derives_default_path_from_experiment_name(tmp_path, monkeypatch):
+  monkeypatch.chdir(tmp_path)
+  rows = [{"model": "Linear Regression", "MAE": 1.0}]
+
+  log_experiment(rows, experiment="obstacle_probing")
+
+  assert (tmp_path / "experiment_log_obstacle_probing.csv").exists()

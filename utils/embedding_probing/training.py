@@ -12,21 +12,21 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from utils.true_distance.data.splitter import split_dataset
-from utils.true_distance.evaluation import evaluate_model
-from utils.true_distance.models.linear_regression import (
+from utils.embedding_probing.data.splitter import split_dataset
+from utils.embedding_probing.evaluation import evaluate_model
+from utils.embedding_probing.models.linear_regression import (
   save_linear_regression,
   train_linear_regression,
 )
-from utils.true_distance.models.mlp.persistence import save_torch_mlp
-from utils.true_distance.models.mlp.train import predict_torch_mlp, train_torch_mlp
-from utils.true_distance.models.mlp.tune import mlp_params_to_kwargs, tune_mlp
-from utils.true_distance.models.random_forest import (
+from utils.embedding_probing.models.mlp.persistence import save_torch_mlp
+from utils.embedding_probing.models.mlp.train import predict_torch_mlp, train_torch_mlp
+from utils.embedding_probing.models.mlp.tune import mlp_params_to_kwargs, tune_mlp
+from utils.embedding_probing.models.random_forest import (
   save_random_forest,
   train_random_forest,
   tune_random_forest,
 )
-from utils.true_distance.models.xgboost_model import (
+from utils.embedding_probing.models.xgboost_model import (
   save_xgboost,
   train_xgboost,
   tune_xgboost,
@@ -45,15 +45,14 @@ def _subsample(X, y, sample_size, seed):
   return X[idx], y[idx]
 
 
-def log_experiment(rows, path="experiment_log.csv"):
+def log_experiment(rows, experiment, path=None):
   """
   Append experiment result rows to a persistent CSV log.
-
-  Reads + rewrites the whole file instead of blindly appending text, so
-  the schema can evolve over time (e.g. a new column added later) without
-  misaligning older rows - pandas fills missing values with NaN when
-  concatenating frames with different columns.
   """
+  if path is None:
+    path = f"experiment_log_{experiment}.csv"
+  for row in rows:
+    row["experiment"] = experiment
   new_df = pd.DataFrame(rows)
   if os.path.exists(path):
     existing_df = pd.read_csv(path)
@@ -77,12 +76,10 @@ def train_and_compare_models(
   """
   Full pipeline: split -> tune each model on Train/Val -> final fit on
   Train -> evaluate once on held-out Test -> save each model -> return a
-  results DataFrame (one row per model, also writable via log_experiment).
+  results DataFrame.
 
   tuning_sample_size: if set, each Optuna trial trains on a random subset of
-  this many Train rows instead of the full Train set - keeps tuning cost
-  roughly constant regardless of dataset size (useful at e.g. 1M samples).
-  The final fit after tuning always uses the FULL Train set regardless.
+  this many Train rows
   """
   os.makedirs(models_dir, exist_ok=True)
   timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

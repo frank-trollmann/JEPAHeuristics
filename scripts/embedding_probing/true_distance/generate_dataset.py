@@ -1,4 +1,4 @@
-from utils.true_distance.generate_true_distance_dataset import (
+from utils.embedding_probing.experiments.true_distance.generate_true_distance_dataset import (
     generate_true_distance_dataset,
     DistanceAlgorithm,
 )

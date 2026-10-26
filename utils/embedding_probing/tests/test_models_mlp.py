@@ -2,9 +2,9 @@ import numpy as np
 import optuna
 import torch
 
-from utils.true_distance.models.mlp.model import TorchMLP
-from utils.true_distance.models.mlp.train import train_torch_mlp, predict_torch_mlp
-from utils.true_distance.models.mlp.tune import tune_mlp, mlp_params_to_kwargs
+from utils.embedding_probing.models.mlp.model import TorchMLP
+from utils.embedding_probing.models.mlp.train import train_torch_mlp, predict_torch_mlp
+from utils.embedding_probing.models.mlp.tune import tune_mlp, mlp_params_to_kwargs
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 

@@ -1,16 +1,16 @@
-from utils.true_distance.data.splitter import heuristic_dataset_to_xy
-from utils.true_distance.training import log_experiment, train_and_compare_models
+from utils.embedding_probing.experiments.position_probing.extraction import position_dataset_to_xy
+from utils.embedding_probing.training import log_experiment, train_and_compare_models
 import argparse
 import pandas as pd
 
 
 def main(dataset_path, n_trials, device, models_dir, log_path, seed, n_jobs, tuning_sample_size):
     dataset = pd.read_pickle(dataset_path)
-    X, y = heuristic_dataset_to_xy(dataset)
+    X, y = position_dataset_to_xy(dataset)
 
     results = train_and_compare_models(
         X, y,
-        dataset_size=len(dataset),
+        dataset_size=len(X),
         n_trials=n_trials,
         device=device,
         models_dir=models_dir,
@@ -19,22 +19,26 @@ def main(dataset_path, n_trials, device, models_dir, log_path, seed, n_jobs, tun
         tuning_sample_size=tuning_sample_size,
     )
 
-    log_experiment(results.to_dict("records"), path=log_path)
+    log_experiment(results.to_dict("records"), experiment="position_probing", path=log_path)
 
     print(results)
-    print(f"Logged results to {log_path}")
+    print(f"Logged results to {log_path or 'experiment_log_position_probing.csv'}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Train and compare heuristic-distance models on a generated dataset"
+        description="Train and compare models that predict (x, y) position from a single "
+                     "JEPA embedding - diagnostic to check whether position is recoverable "
+                     "from the embedding at all, independent of the distance-prediction task."
     )
 
     parser.add_argument(
         "--dataset_path",
         type=str,
         required=True,
-        help="Path to the .pkl dataset file (from scripts/true_distance/generate_dataset.py)",
+        help="Path to the .pkl dataset file (same format as the distance task, "
+             "from scripts/embedding_probing/true_distance/generate_dataset.py) - agent/goal embeddings "
+             "and positions are extracted and deduplicated into single-embedding rows.",
     )
 
     parser.add_argument(
@@ -55,15 +59,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--models_dir",
         type=str,
-        default="models",
+        default="models/position_probing",
         help="Directory to save trained models into",
     )
 
     parser.add_argument(
         "--log_path",
         type=str,
-        default="experiment_log.csv",
-        help="Path to the persistent experiment-results CSV log",
+        default=None,
+        help="Path to the persistent experiment-results CSV log. "
+             "Defaults to experiment_log_position_probing.csv - one file per experiment.",
     )
 
     parser.add_argument(

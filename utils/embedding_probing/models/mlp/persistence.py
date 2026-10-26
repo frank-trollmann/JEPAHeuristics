@@ -2,7 +2,7 @@ import json
 
 import torch
 
-from utils.true_distance.models.mlp.model import TorchMLP
+from utils.embedding_probing.models.mlp.model import TorchMLP
 
 
 def save_torch_mlp(model, path, input_dim, hidden_dims, dropout, output_dim=1):

@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-from utils.true_distance.models.linear_regression import (
+from utils.embedding_probing.models.linear_regression import (
   load_linear_regression,
   save_linear_regression,
   train_linear_regression,

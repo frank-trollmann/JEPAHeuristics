@@ -1,6 +1,6 @@
 import optuna
 
-from utils.true_distance.models.mlp.train import train_torch_mlp
+from utils.embedding_probing.models.mlp.train import train_torch_mlp
 
 
 def mlp_params_to_kwargs(params):

@@ -2,7 +2,7 @@ import numpy as np
 import optuna
 from sklearn.ensemble import RandomForestRegressor
 
-from utils.true_distance.models.random_forest import (
+from utils.embedding_probing.models.random_forest import (
   load_random_forest,
   save_random_forest,
   train_random_forest,

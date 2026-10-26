@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from utils.true_distance.evaluation import evaluate_predictions, evaluate_model
+from utils.embedding_probing.evaluation import evaluate_predictions, evaluate_model
 
 
 def test_evaluate_predictions_perfect_match():

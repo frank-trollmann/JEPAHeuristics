@@ -3,7 +3,7 @@ import optuna
 from sklearn.multioutput import MultiOutputRegressor
 from xgboost import XGBRegressor
 
-from utils.true_distance.models.xgboost_model import (
+from utils.embedding_probing.models.xgboost_model import (
   load_xgboost,
   save_xgboost,
   train_xgboost,

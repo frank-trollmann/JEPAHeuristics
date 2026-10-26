@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from stable_worldmodel.envs.two_room import TwoRoomEnv
 
-from utils.true_distance.generate_true_distance_dataset import (
+from utils.embedding_probing.experiments.true_distance.generate_true_distance_dataset import (
     DistanceAlgorithm,
     _sample_valid_position,
     _wall_geometry,
