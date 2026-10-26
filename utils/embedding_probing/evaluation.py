@@ -14,10 +14,20 @@ def _mean_correlation(y_true, y_pred, corr_fn):
   return float(np.mean(per_column))
 
 
+def _mean_l2_error(y_true, y_pred):
+  """
+  Mean per-sample L2 (Euclidean) distance between prediction and target.
+  """
+  diff = y_true - y_pred
+  if diff.ndim == 1:
+    return float(np.mean(np.abs(diff)))
+  return float(np.mean(np.linalg.norm(diff, axis=1)))
+
+
 def evaluate_predictions(y_true, y_pred):
   """
-  Compute MAE, MSE, R2, Pearson, Spearman between true and predicted values.
-  Returns a dict - the same metrics used throughout this project.
+  Compute MAE, MSE, R2, Pearson, Spearman, L2Error between true and
+  predicted values
   """
   y_true = np.asarray(y_true, dtype=float)
   y_pred = np.asarray(y_pred, dtype=float)
@@ -28,6 +38,7 @@ def evaluate_predictions(y_true, y_pred):
     "R2": r2_score(y_true, y_pred),
     "Pearson": _mean_correlation(y_true, y_pred, pearsonr),
     "Spearman": _mean_correlation(y_true, y_pred, spearmanr),
+    "L2Error": _mean_l2_error(y_true, y_pred),
   }
 
 
