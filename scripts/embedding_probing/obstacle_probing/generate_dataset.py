@@ -1,32 +1,33 @@
-from utils.true_distance.generate_true_distance_dataset import (
-    generate_true_distance_dataset,
-    DistanceAlgorithm,
+from utils.embedding_probing.experiments.obstacle_probing.generate_random_obstacles import (
+    generate_random_obstacles_dataset,
 )
 from datetime import datetime
 import argparse
 import os
 
 
-def main(num_samples: int, device: str, seed: int, batch_size: int, algorithm: DistanceAlgorithm):
-    dataset = generate_true_distance_dataset(
+def main(num_samples: int, device: str, seed: int, batch_size: int):
+    dataset = generate_random_obstacles_dataset(
         num_samples=num_samples,
         seed=seed,
         device=device,
         batch_size=batch_size,
-        algorithm=algorithm,
     )
 
     os.makedirs("data", exist_ok=True)
     current_datetime = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
-    safe_path = f"data/{current_datetime}_{num_samples}_true_distance_dataset.pkl"
+    safe_path = f"data/{current_datetime}_{num_samples}_random_obstacles_dataset.pkl"
 
     dataset.to_pickle(safe_path)
-    print(f"Saved true-distance dataset to {safe_path}")
+    print(f"Saved random-obstacles dataset to {safe_path}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Generate a true-distance (wall-aware) JEPA heuristic dataset"
+        description="Generate a dataset with per-sample randomized door "
+                     "position/size, for the obstacle-probing diagnostic "
+                     "(can a single JEPA embedding be decoded back into the "
+                     "door's position/size on the dividing wall?)"
     )
 
     parser.add_argument(
@@ -47,8 +48,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--seed",
         type=int,
-        default=None,
-        help="Random seed for reproducibility",
+        default=42,
+        help="Random seed for reproducibility - controls both the door "
+             "geometry resampled per sample and the agent/goal positions",
     )
 
     parser.add_argument(
@@ -58,14 +60,6 @@ if __name__ == "__main__":
         help="Samples per encoder batch (2x this many images per call) - raise this to make better use of a GPU",
     )
 
-    parser.add_argument(
-        "--algorithm",
-        type=str,
-        default=DistanceAlgorithm.MAZE_FORMULA.value,
-        choices=[a.value for a in DistanceAlgorithm],
-        help="Distance algorithm for the heuristic label - maze_formula (fast, default) or dijkstra (slow, reference/comparison only)",
-    )
-
     args = parser.parse_args()
 
     main(
@@ -73,5 +67,4 @@ if __name__ == "__main__":
         device=args.device,
         seed=args.seed,
         batch_size=args.batch_size,
-        algorithm=DistanceAlgorithm(args.algorithm),
     )

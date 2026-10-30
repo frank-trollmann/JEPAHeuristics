@@ -9,6 +9,11 @@ from huggingface_hub import snapshot_download
 from stable_worldmodel.envs.two_room import TwoRoomEnv
 
 import utils.load_fix_pretrained as load_util
+from utils.embedding_probing.experiments.shared.env_helpers import (
+  _render_agent_at,
+  _sample_valid_position,
+  build_occupancy_grid,
+)
 
 
 class DistanceAlgorithm(Enum):
@@ -29,17 +34,6 @@ _ORTHOGONAL_NEIGHBORS = [
 _DIAGONAL_NEIGHBORS = [
   (-1, -1, 2 ** 0.5), (-1, 1, 2 ** 0.5), (1, -1, 2 ** 0.5), (1, 1, 2 ** 0.5),
 ]
-
-
-def build_occupancy_grid(env: TwoRoomEnv):
-  """
-  returns 2d Numpy array in the format (height, width)
-  with a boolean value 
-  true  = accessible field 
-  false = inaccessible field 
-  """
-  wall_mask, _door_mask = env._wall_and_door_masks()
-  return (~wall_mask).numpy() # return !boolean value
 
 
 def dijkstra_distance(walkable: np.ndarray, start_xy, goal_xy):
@@ -181,21 +175,6 @@ def compute_batch_distances(pos_a_batch, pos_g_batch, geom, walkable, algorithm:
     raise ValueError(f"Unsupported algorithm: {algorithm}")
 
 
-def _sample_valid_position(env: TwoRoomEnv, walkable: np.ndarray, rng: random.Random):
-  """
-  Sample a random walkable position within the env's valid bounds.
-  Used for random start and target position
-  """
-  pos_min = float(env.BORDER_SIZE)
-  pos_max = float(env.IMG_SIZE - env.BORDER_SIZE - 1)
-
-  while True:
-    x = rng.uniform(pos_min, pos_max)
-    y = rng.uniform(pos_min, pos_max)
-    if walkable[int(round(y)), int(round(x))]:
-      return [x, y]
-
-
 def generate_true_distance_dataset(
   num_samples=1000,
   checkpoint_path=None,
@@ -213,6 +192,12 @@ def generate_true_distance_dataset(
   walkable = build_occupancy_grid(env)
   geom = _wall_geometry(env)
   rng = random.Random(seed)
+
+  # Wall/door layout is fixed for the whole generation run (only agent and
+  # goal positions change per sample) - cache the mask once instead of
+  # recomputing it on every single render call
+  _cached_wall_mask, _cached_door_mask = env._wall_and_door_masks()
+  env._wall_and_door_masks = lambda: (_cached_wall_mask, _cached_door_mask)
 
   # If the checkpoint_path is not specified it defaults to the HF pretrained
   if checkpoint_path is None:
@@ -244,11 +229,9 @@ def generate_true_distance_dataset(
         batch_pos_a.append(pos_a)
         batch_pos_g.append(pos_g)
 
-        env.reset(options={"state": pos_a})
-        batch_imgs.append(env.render())
-
-        env.reset(options={"state": pos_g})
-        batch_imgs.append(env.render())
+        # call internal methods to save compute time
+        batch_imgs.append(_render_agent_at(env, pos_a))
+        batch_imgs.append(_render_agent_at(env, pos_g))
 
       # Stack all 2*(agent + goal) current_batch images into one (B, T=1, C, H, W) batch
       imgs_np = np.stack(batch_imgs)  # merge all images of batch into single array 
