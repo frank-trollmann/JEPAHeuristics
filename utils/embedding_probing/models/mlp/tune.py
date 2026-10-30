@@ -44,7 +44,7 @@ def _objective(trial, X_train, y_train, X_val, y_val, device, seed):
   return best_val_mae
 
 
-def tune_mlp(X_train, y_train, X_val, y_val, n_trials=50, device="cpu", seed=None):
+def tune_mlp(X_train, y_train, X_val, y_val, n_trials=50, device="cpu", seed=42):
   """
   Optuna hyperparameter search for the TorchMLP, scored on the held-out
   validation set (MAE, lower is better).
@@ -55,7 +55,7 @@ def tune_mlp(X_train, y_train, X_val, y_val, n_trials=50, device="cpu", seed=Non
   sampler = optuna.samplers.TPESampler(seed=seed)
   study = optuna.create_study(direction="minimize", sampler=sampler)
   study.optimize(
-    lambda trial: _objective(trial, X_train, y_train, X_val, y_val, device, seed or 42),
+    lambda trial: _objective(trial, X_train, y_train, X_val, y_val, device, seed),
     n_trials=n_trials,
   )
   return study.best_params, study
