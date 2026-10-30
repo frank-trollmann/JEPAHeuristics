@@ -1,0 +1,106 @@
+from utils.embedding_probing.experiments.true_distance.extraction import heuristic_dataset_to_xy
+from utils.embedding_probing.training import log_experiment, train_and_compare_models
+import argparse
+import pandas as pd
+
+
+def main(dataset_path, n_trials, device, models_dir, log_path, seed, n_jobs, tuning_sample_size):
+    dataset = pd.read_pickle(dataset_path)
+    X, y = heuristic_dataset_to_xy(dataset)
+
+    results = train_and_compare_models(
+        X, y,
+        dataset_size=len(dataset),
+        n_trials=n_trials,
+        device=device,
+        models_dir=models_dir,
+        seed=seed,
+        n_jobs=n_jobs,
+        tuning_sample_size=tuning_sample_size,
+    )
+
+    log_experiment(results.to_dict("records"), experiment="true_distance", path=log_path)
+
+    print(results)
+    print(f"Logged results to {log_path or 'experiment_log_true_distance.csv'}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Train and compare heuristic-distance models on a generated dataset"
+    )
+
+    parser.add_argument(
+        "--dataset_path",
+        type=str,
+        required=True,
+        help="Path to the .pkl dataset file (from scripts/embedding_probing/true_distance/generate_dataset.py)",
+    )
+
+    parser.add_argument(
+        "--n_trials",
+        type=int,
+        default=50,
+        help="Number of Optuna trials per tunable model",
+    )
+
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cpu",
+        choices=["cpu", "cuda"],
+        help="Device to run XGBoost/MLP on",
+    )
+
+    parser.add_argument(
+        "--models_dir",
+        type=str,
+        default="models/true_distance",
+        help="Directory to save trained models into",
+    )
+
+    parser.add_argument(
+        "--log_path",
+        type=str,
+        default=None,
+        help="Path to the persistent experiment-results CSV log. "
+             "Defaults to experiment_log_true_distance.csv - one file per experiment.",
+    )
+
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for the train/val/test split and model training",
+    )
+
+    parser.add_argument(
+        "--n_jobs",
+        type=int,
+        default=None,
+        help="CPU cores for Random Forest (None=1 core, -1=all cores). "
+             "Safe default of 1 core - pass a higher number explicitly on a shared machine with headroom.",
+    )
+
+    parser.add_argument(
+        "--tuning_sample_size",
+        type=int,
+        default=None,
+        help="If set, each Optuna trial trains on a random subset of this many "
+             "Train rows instead of the full Train set - keeps tuning cost roughly "
+             "constant regardless of dataset size (useful at e.g. 1M samples). "
+             "The final fit after tuning always uses the full Train set.",
+    )
+
+    args = parser.parse_args()
+
+    main(
+        dataset_path=args.dataset_path,
+        n_trials=args.n_trials,
+        device=args.device,
+        models_dir=args.models_dir,
+        log_path=args.log_path,
+        seed=args.seed,
+        n_jobs=args.n_jobs,
+        tuning_sample_size=args.tuning_sample_size,
+    )
