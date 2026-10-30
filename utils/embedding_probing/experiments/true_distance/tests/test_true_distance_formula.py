@@ -4,11 +4,13 @@ import numpy as np
 import pytest
 from stable_worldmodel.envs.two_room import TwoRoomEnv
 
+from utils.embedding_probing.experiments.shared.env_helpers import (
+    _sample_valid_position,
+    build_occupancy_grid,
+)
 from utils.embedding_probing.experiments.true_distance.generate_true_distance_dataset import (
     DistanceAlgorithm,
-    _sample_valid_position,
     _wall_geometry,
-    build_occupancy_grid,
     compute_batch_distances,
     dijkstra_distance,
     true_distance,
