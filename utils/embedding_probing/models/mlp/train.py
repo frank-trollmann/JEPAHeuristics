@@ -32,7 +32,7 @@ def train_torch_mlp(
   y_val_t = torch.tensor(y_val, dtype=torch.float32, device=device)
 
   loader = DataLoader(
-    TensorDataset(X_train_t, y_train_t), batch_size=batch_size, shuffle=True
+    TensorDataset(X_train_t, y_train_t), batch_size=batch_size, shuffle=True, drop_last=True
   )
 
 # dynamicaly extract y output dimensions
