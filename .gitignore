@@ -6,6 +6,10 @@ __pycache__/
 # JetBrains IDE specific file
 .idea/
 
+# Generated datasets and trained models (large, shouldn't live in git history)
+/data/
+/models/
+
 # C extensions
 *.so
 
@@ -233,3 +237,5 @@ docs/superpowers/
 data/
 models/
 stable_worldmodel/
+
+experiment_log*.csv
