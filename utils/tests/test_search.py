@@ -101,3 +101,18 @@ def test_recording_does_not_change_the_search():
     recorded = search(adjacency, start, goal, h, planner, record=True)
 
     assert (plain["found"], plain["cost"], plain["expansions"]) == (recorded["found"], recorded["cost"], recorded["expansions"])
+
+
+def test_weighted_astar_stays_within_the_weight_bound_and_expands_fewer_nodes():
+  positions, index, adjacency = open_grid(20)
+  start, goal = index[(0, 0)], index[(19, 12)]
+  optimal = octile(positions, positions[goal])[start]
+  weak = 0.5 * octile(positions, positions[goal])  # never overestimates, but weak: plain A* spreads out
+
+  plain = search(adjacency, start, goal, weak, "astar")
+  assert plain["cost"] == pytest.approx(optimal)
+  for weight in (1.5, 2.0, 5.0):
+    result = search(adjacency, start, goal, weak, "astar", weight=weight)
+    assert result["found"] and result["cost"] <= weight * optimal + 1e-9
+  # weight 2 turns the weak heuristic back into the exact one, so the search dives to the goal
+  assert search(adjacency, start, goal, weak, "astar", weight=2.0)["expansions"] < plain["expansions"] / 2

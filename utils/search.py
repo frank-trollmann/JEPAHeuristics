@@ -16,13 +16,14 @@ def make_adjacency(graph):
   return (graph + graph.T).tocsr()
 
 
-def search(adjacency, start, goal, heuristic, planner, record=False):
+def search(adjacency, start, goal, heuristic, planner, record=False, weight=1.0):
   """
   Finds a path from start to goal (node indices).
 
   dfs: ignores the heuristic and goes deep first (neighbours in a fixed order).
   greedy: expands the node with the smallest heuristic value.
-  astar: expands the node with the smallest cost so far plus heuristic value.
+  astar: expands the node with the smallest cost so far plus weight * heuristic value. weight 1 is plain A*;
+  weight w > 1 is weighted A*: with a heuristic that never overestimates, the path costs at most w times the optimum.
 
   Returns a dict: found, cost (length of the path that was found), expansions (nodes taken off the frontier).
   With record=True it also returns expanded (the nodes in the order they were expanded) and path (the nodes
@@ -86,7 +87,7 @@ def search(adjacency, start, goal, heuristic, planner, record=False):
         if new_cost >= best_cost.get(neighbour, np.inf):
           continue
         closed.discard(neighbour)  # a cheaper path was found: allow expanding it again (the heuristic may be inconsistent)
-        priority, tie = new_cost + heuristic[neighbour], heuristic[neighbour]
+        priority, tie = new_cost + weight * heuristic[neighbour], heuristic[neighbour]
       best_cost[neighbour] = new_cost
       parent[neighbour] = node
       heapq.heappush(frontier, (priority, tie, new_cost, neighbour))
