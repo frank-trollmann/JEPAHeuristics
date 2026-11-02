@@ -12,6 +12,7 @@ from utils.embedding_probing.experiments.shared.env_helpers import (
   _sample_valid_position,
   build_occupancy_grid,
 )
+from utils.embedding_probing.experiments.shared.normalization import normalise_images
 
 
 def _door_geometry(env: TwoRoomEnv):
@@ -30,6 +31,7 @@ def generate_random_obstacles_dataset(
   seed=42,
   device="cpu",
   batch_size=1,
+  normalize=True,
 ):
   """
   Generates a dataset of (agent_encoding, goal_encoding, door_y, door_size)
@@ -95,6 +97,9 @@ def generate_random_obstacles_dataset(
         .unsqueeze(1)
         .to(device)
       )
+
+      if normalize:
+        t_imgs = normalise_images(t_imgs)
 
       # create embeddings
       enc = model.encode({"pixels": t_imgs})["emb"]

@@ -7,13 +7,14 @@ import argparse
 import os
 
 
-def main(num_samples: int, device: str, seed: int, batch_size: int, algorithm: DistanceAlgorithm):
+def main(num_samples: int, device: str, seed: int, batch_size: int, algorithm: DistanceAlgorithm, normalize: bool):
     dataset = generate_true_distance_dataset(
         num_samples=num_samples,
         seed=seed,
         device=device,
         batch_size=batch_size,
         algorithm=algorithm,
+        normalize=normalize,
     )
 
     os.makedirs("data", exist_ok=True)
@@ -66,6 +67,15 @@ if __name__ == "__main__":
         help="Distance algorithm for the heuristic label - maze_formula (fast, default) or dijkstra (slow, reference/comparison only)",
     )
 
+    parser.add_argument(
+        "--normalize",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Scale frames to [0,1] and apply ImageNet mean/std normalization before encoding "
+             "(the encoder was trained on normalized images, LeWM.encode does not rescale "
+             "itself). Pass --no-normalize to reproduce the old (buggy) unnormalized behavior.",
+    )
+
     args = parser.parse_args()
 
     main(
@@ -74,4 +84,5 @@ if __name__ == "__main__":
         seed=args.seed,
         batch_size=args.batch_size,
         algorithm=DistanceAlgorithm(args.algorithm),
+        normalize=args.normalize,
     )

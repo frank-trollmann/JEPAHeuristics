@@ -6,12 +6,13 @@ import argparse
 import os
 
 
-def main(num_samples: int, device: str, seed: int, batch_size: int):
+def main(num_samples: int, device: str, seed: int, batch_size: int, normalize: bool):
     dataset = generate_random_obstacles_dataset(
         num_samples=num_samples,
         seed=seed,
         device=device,
         batch_size=batch_size,
+        normalize=normalize,
     )
 
     os.makedirs("data", exist_ok=True)
@@ -60,6 +61,15 @@ if __name__ == "__main__":
         help="Samples per encoder batch (2x this many images per call) - raise this to make better use of a GPU",
     )
 
+    parser.add_argument(
+        "--normalize",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Scale frames to [0,1] and apply ImageNet mean/std normalization before encoding "
+             "(the encoder was trained on normalized images, LeWM.encode does not rescale "
+             "itself). Pass --no-normalize to reproduce the old (buggy) unnormalized behavior.",
+    )
+
     args = parser.parse_args()
 
     main(
@@ -67,4 +77,5 @@ if __name__ == "__main__":
         device=args.device,
         seed=args.seed,
         batch_size=args.batch_size,
+        normalize=args.normalize,
     )
