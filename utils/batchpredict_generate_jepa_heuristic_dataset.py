@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from stable_worldmodel.envs.two_room import TwoRoomEnv
 import utils.load_fix_pretrained as load_util
+from utils.image_preprocessing import normalise_images
 from huggingface_hub import snapshot_download
 
 def batchpredict_generate_jepa_heuristic_dataset(num_samples=1000, batch_size=32, checkpoint_path=None):
@@ -63,6 +64,7 @@ def batchpredict_generate_jepa_heuristic_dataset(num_samples=1000, batch_size=32
     # Shape: (Batch, Time=1, Channel, H, W) -> (batch_size, 1, 3, 224, 224)
     t_batch_a = torch.from_numpy(np.array(agent_images)).permute(0, 3, 1, 2).float().unsqueeze(1).to(device)
     t_batch_g = torch.from_numpy(np.array(goal_images)).permute(0, 3, 1, 2).float().unsqueeze(1).to(device)
+    t_batch_a, t_batch_g = normalise_images(t_batch_a), normalise_images(t_batch_g)  # scale to [0, 1] and ImageNet-normalise, like the LeWM training and evaluation
 
     # 3. Batch Encode (The GPU "Magic" happens here)
     with torch.no_grad():

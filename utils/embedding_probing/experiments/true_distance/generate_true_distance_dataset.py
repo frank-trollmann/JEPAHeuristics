@@ -9,6 +9,7 @@ from huggingface_hub import snapshot_download
 from stable_worldmodel.envs.two_room import TwoRoomEnv
 
 import utils.load_fix_pretrained as load_util
+from utils.image_preprocessing import normalise_images
 from utils.embedding_probing.experiments.shared.env_helpers import (
   _render_agent_at,
   _sample_valid_position,
@@ -242,6 +243,7 @@ def generate_true_distance_dataset(
         .unsqueeze(1) # Add T
         .to(device)
       ) 
+      t_imgs = normalise_images(t_imgs)  # scale to [0, 1] and ImageNet-normalise, like the LeWM training and evaluation
 
       # create embeddings
       enc = model.encode({"pixels": t_imgs})["emb"] 
