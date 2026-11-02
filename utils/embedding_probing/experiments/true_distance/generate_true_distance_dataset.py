@@ -14,6 +14,7 @@ from utils.embedding_probing.experiments.shared.env_helpers import (
   _sample_valid_position,
   build_occupancy_grid,
 )
+from utils.embedding_probing.experiments.shared.normalization import normalise_images
 
 
 class DistanceAlgorithm(Enum):
@@ -182,6 +183,7 @@ def generate_true_distance_dataset(
   device="cpu",
   batch_size=1,
   algorithm: DistanceAlgorithm = DistanceAlgorithm.MAZE_FORMULA,
+  normalize=True,
 ):
   """
   Generates a dataset of (agent_encoding, goal_encoding, heuristic)
@@ -241,10 +243,13 @@ def generate_true_distance_dataset(
         .float()
         .unsqueeze(1) # Add T
         .to(device)
-      ) 
+      )
+
+      if normalize:
+        t_imgs = normalise_images(t_imgs)
 
       # create embeddings
-      enc = model.encode({"pixels": t_imgs})["emb"] 
+      enc = model.encode({"pixels": t_imgs})["emb"]
       enc = enc.squeeze(1).cpu().numpy()  # Remove T 
 
       vecs_a = enc[0::2]  # agent embeddings
