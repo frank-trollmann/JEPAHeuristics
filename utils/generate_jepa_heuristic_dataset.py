@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from stable_worldmodel.envs.two_room import TwoRoomEnv
 import utils.load_fix_pretrained as load_util
+from utils.embedding_probing.experiments.shared.normalization import normalise_images
 from huggingface_hub import snapshot_download
 
 def generate_jepa_heuristic_dataset(num_samples=1000, checkpoint_path=None):
@@ -55,6 +56,7 @@ def generate_jepa_heuristic_dataset(num_samples=1000, checkpoint_path=None):
       # then unsqueeze twice: once for Batch, once for Time.
       t_img_a = torch.from_numpy(img_a).permute(2, 0, 1).float().unsqueeze(0).unsqueeze(0).to(device)
       t_img_g = torch.from_numpy(img_g).permute(2, 0, 1).float().unsqueeze(0).unsqueeze(0).to(device)
+      t_img_a, t_img_g = normalise_images(t_img_a), normalise_images(t_img_g)  # scale to [0, 1] and ImageNet-normalise, like the LeWM training and evaluation
 
       # Encode images to Latent Space
       # We wrap in a dict because model.encode expects the format used by the DataLoader
