@@ -1,10 +1,3 @@
-"""
-Image preparation for the LeWM encoder.
-
-The encoder was trained and is evaluated on images that are scaled to [0, 1] and then normalised with the
-ImageNet mean and standard deviation per colour channel (le-wm/utils.py get_img_preprocessor, le-wm/eval.py
-img_transform). Rendered frames have values 0-255, and LeWM.encode does not rescale them.
-"""
 import torch
 from stable_pretraining.data import dataset_stats
 

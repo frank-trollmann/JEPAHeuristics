@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from stable_worldmodel.envs.two_room import TwoRoomEnv
 import utils.load_fix_pretrained as load_util
-from utils.image_preprocessing import normalise_images
+from utils.embedding_probing.experiments.shared.normalization import normalise_images
 from huggingface_hub import snapshot_download
 
 def batchpredict_generate_jepa_heuristic_dataset(num_samples=1000, batch_size=32, checkpoint_path=None):

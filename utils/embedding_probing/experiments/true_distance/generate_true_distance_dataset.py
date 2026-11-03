@@ -9,12 +9,12 @@ from huggingface_hub import snapshot_download
 from stable_worldmodel.envs.two_room import TwoRoomEnv
 
 import utils.load_fix_pretrained as load_util
-from utils.image_preprocessing import normalise_images
 from utils.embedding_probing.experiments.shared.env_helpers import (
   _render_agent_at,
   _sample_valid_position,
   build_occupancy_grid,
 )
+from utils.embedding_probing.experiments.shared.normalization import normalise_images
 
 
 class DistanceAlgorithm(Enum):
@@ -183,6 +183,7 @@ def generate_true_distance_dataset(
   device="cpu",
   batch_size=1,
   algorithm: DistanceAlgorithm = DistanceAlgorithm.MAZE_FORMULA,
+  normalize=True,
 ):
   """
   Generates a dataset of (agent_encoding, goal_encoding, heuristic)
@@ -242,11 +243,13 @@ def generate_true_distance_dataset(
         .float()
         .unsqueeze(1) # Add T
         .to(device)
-      ) 
-      t_imgs = normalise_images(t_imgs)  # scale to [0, 1] and ImageNet-normalise, like the LeWM training and evaluation
+      )
+
+      if normalize:
+        t_imgs = normalise_images(t_imgs)
 
       # create embeddings
-      enc = model.encode({"pixels": t_imgs})["emb"] 
+      enc = model.encode({"pixels": t_imgs})["emb"]
       enc = enc.squeeze(1).cpu().numpy()  # Remove T 
 
       vecs_a = enc[0::2]  # agent embeddings

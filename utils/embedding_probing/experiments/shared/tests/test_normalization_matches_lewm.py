@@ -4,7 +4,7 @@ import torch
 from torchvision.transforms import v2 as transforms
 from stable_pretraining.data import dataset_stats
 
-from utils.image_preprocessing import normalise_images
+from utils.embedding_probing.experiments.shared.normalization import normalise_images
 
 
 def test_matches_the_transform_of_the_official_lewm_evaluation():
