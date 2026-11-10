@@ -115,13 +115,18 @@ class LinearRegressor:
     that scales with the number of rows.
     """
 
-    def __init__(self, chunk_size: int = 131072):
+    def __init__(self, chunk_size: int = 131072, standardize: bool = True):
         self.chunk_size = chunk_size
+        self.standardize = standardize
+        self.standardizer = Standardizer() if standardize else None
 
     def fit(self, X, y):
         num_rows, num_features = X.shape
         device = X.device
         targets = y.reshape(-1, 1)
+
+        if self.standardizer is not None:
+            X = self.standardizer.fit_transform(X)
 
         gram = torch.zeros(num_features + 1, num_features + 1,
                            dtype=torch.float64, device=device)
@@ -149,12 +154,14 @@ class LinearRegressor:
         return self
 
     def predict(self, X):
+        if self.standardizer is not None:
+            X = self.standardizer.transform(X)
         return (X @ self.coef_.T + self.intercept_).squeeze(1)
 
 
 def train_xgboost(X, y, n_estimators: int = 500, max_depth: int = 6,
                   learning_rate: float = 0.1, device: str = "cuda",
-                  max_rows: int = 0):
+                  max_rows: int = 0, standardize: bool = True):
     """
     Gradient boosted trees on the GPU (XGBoost `tree_method="hist"`).
 
@@ -176,6 +183,13 @@ def train_xgboost(X, y, n_estimators: int = 500, max_depth: int = 6,
         subset = torch.randperm(num_rows, device=X.device)[:max_rows]
         X, y = X[subset], y[subset]
 
+    # XGBoost benefits from standardization (tree models are invariant to monotonic
+    # transformations, but hist-based splitting is numerically more stable with
+    # zero-mean, unit-variance features).
+    standardizer = Standardizer() if standardize else None
+    X_np = standardizer.fit_transform(X) if standardizer else _to_numpy(X)
+    y_np = _to_numpy(y)
+
     model = xgb.XGBRegressor(
         n_estimators=n_estimators,
         max_depth=max_depth,
@@ -186,7 +200,8 @@ def train_xgboost(X, y, n_estimators: int = 500, max_depth: int = 6,
         device=device,
         n_jobs=n_jobs,
     )
-    model.fit(_to_numpy(X), _to_numpy(y))
+    model.fit(X_np, y_np)
+    model.standardizer = standardizer  # attach for later transform in predict()
     return model
 
 
@@ -200,6 +215,42 @@ class _Standardize(torch.nn.Module):
 
     def forward(self, x):
         return (x - self.mean) / self.std
+
+
+class Standardizer:
+    """
+    Computes mean/std from X_train and applies z-score normalization.
+
+    Works on both CPU (numpy) and GPU (torch) tensors. The fitted statistics
+    are stored as numpy arrays so the same object can be used to transform
+    both CPU-based models (XGBoost) and GPU-based models (Linear, MLP).
+    """
+
+    def __init__(self):
+        self.mean = None
+        self.std = None
+
+    def fit(self, X):
+        """Compute mean and std from X. X can be a torch.Tensor or numpy array."""
+        if isinstance(X, torch.Tensor):
+            self.mean = X.mean(dim=0).cpu().numpy()
+            self.std = X.std(dim=0).cpu().numpy()
+        else:
+            self.mean = X.mean(axis=0)
+            self.std = X.std(axis=0)
+        self.std = np.where(self.std < 1e-6, 1.0, self.std)
+        return self
+
+    def transform(self, X):
+        """Apply z-score normalization. Returns same type as input."""
+        if isinstance(X, torch.Tensor):
+            return (X - torch.from_numpy(self.mean).to(X.device)) / torch.from_numpy(self.std).to(X.device)
+        else:
+            return (X - self.mean) / self.std
+
+    def fit_transform(self, X):
+        self.fit(X)
+        return self.transform(X)
 
 
 def train_mlp(X, y, hidden_layers=(64, 32), epochs: int = 100,
@@ -266,7 +317,11 @@ def predict(model, X, batch_size: int = 8192) -> torch.Tensor:
             return model.predict(X)
 
     # XGBoost
-    pred = model.predict(_to_numpy(X))
+    if hasattr(model, "standardizer") and model.standardizer is not None:
+        X_np = model.standardizer.transform(X)
+    else:
+        X_np = _to_numpy(X)
+    pred = model.predict(X_np)
     return torch.as_tensor(pred, device=X.device, dtype=torch.float32).reshape(-1)
 
 
