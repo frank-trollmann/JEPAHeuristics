@@ -160,10 +160,11 @@ class LinearRegressor:
 
 
 def train_xgboost(X, y, n_estimators: int = 500, max_depth: int = 6,
-                  learning_rate: float = 0.1, device: str = "cuda",
-                  max_rows: int = 0, standardize: bool = True):
+                  learning_rate: float = 0.1, device: str = "cpu",
+                  max_rows: int = 0, standardize: bool = True,
+                  subsample: float = 0.8, colsample_bytree: float = 0.8):
     """
-    Gradient boosted trees on the GPU (XGBoost `tree_method="hist"`).
+    Gradient boosted trees on CPU or GPU (XGBoost `tree_method="hist"`).
 
     XGBoost takes host/NumPy input here, so the training matrix is copied back
     once; prediction happens on the GPU.
@@ -194,8 +195,8 @@ def train_xgboost(X, y, n_estimators: int = 500, max_depth: int = 6,
         n_estimators=n_estimators,
         max_depth=max_depth,
         learning_rate=learning_rate,
-        subsample=0.8,
-        colsample_bytree=0.8,
+        subsample=subsample,
+        colsample_bytree=colsample_bytree,
         tree_method="hist",
         device=device,
         n_jobs=n_jobs,
