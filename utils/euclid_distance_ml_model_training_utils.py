@@ -1,9 +1,8 @@
 def train_xgboost(X, y, n_estimators: int = 500, max_depth: int = 6,
                   learning_rate: float = 0.1, device: str = "cuda",
-                  max_rows: int = 0, standardize: bool = True,
-                  subsample: float = 0.8, colsample_bytree: float = 0.8):
+                  max_rows: int = 0, standardize: bool = True):
     """
-    Gradient boosted trees on CPU or GPU (XGBoost `tree_method="hist"`).
+    Gradient boosted trees on the GPU (XGBoost `tree_method="hist"`).
 
     XGBoost takes host/NumPy input here, so the training matrix is copied back
     once; prediction happens on the GPU.
@@ -30,23 +29,14 @@ def train_xgboost(X, y, n_estimators: int = 500, max_depth: int = 6,
     X_np = standardizer.fit_transform(X) if standardizer else _to_numpy(X)
     y_np = _to_numpy(y)
 
-    # Try GPU first, fall back to CPU if CuPy is not available
-    actual_device = device
-    if device == "cuda":
-        try:
-            import cupy  # noqa: F401
-        except ImportError:
-            print("XGBoost: CuPy not found, falling back to CPU")
-            actual_device = "cpu"
-
     model = xgb.XGBRegressor(
         n_estimators=n_estimators,
         max_depth=max_depth,
         learning_rate=learning_rate,
-        subsample=subsample,
-        colsample_bytree=colsample_bytree,
+        subsample=0.8,
+        colsample_bytree=0.8,
         tree_method="hist",
-        device=actual_device,
+        device=device,
         n_jobs=n_jobs,
     )
     model.fit(X_np, y_np)
