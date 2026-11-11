@@ -187,7 +187,7 @@ def train_xgboost(X, y, n_estimators: int = 500, max_depth: int = 6,
     # transformations, but hist-based splitting is numerically more stable with
     # zero-mean, unit-variance features).
     standardizer = Standardizer() if standardize else None
-    X_np = standardizer.fit_transform(X) if standardizer else _to_numpy(X)
+    X_np = _to_numpy(standardizer.fit_transform(X)) if standardizer else _to_numpy(X)
     y_np = _to_numpy(y)
 
     model = xgb.XGBRegressor(
@@ -318,7 +318,7 @@ def predict(model, X, batch_size: int = 8192) -> torch.Tensor:
 
     # XGBoost
     if hasattr(model, "standardizer") and model.standardizer is not None:
-        X_np = model.standardizer.transform(X)
+        X_np = _to_numpy(model.standardizer.transform(X))
     else:
         X_np = _to_numpy(X)
     pred = model.predict(X_np)
