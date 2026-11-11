@@ -89,6 +89,7 @@ def grid_search_xgboost(x_train, y_train, x_test, y_test, param_grids, device, n
             all_results.append({
                 "params": params,
                 "MAE": mae,
+                "MSE": metrics["MSE"],
                 "R2": r2,
                 "Pearson": metrics["Pearson"],
                 "Spearman": metrics["Spearman"],
@@ -140,6 +141,7 @@ def grid_search_mlp(x_train, y_train, x_test, y_test, param_grids):
             all_results.append({
                 "params": params,
                 "MAE": mae,
+                "MSE": metrics["MSE"],
                 "R2": r2,
                 "Pearson": metrics["Pearson"],
                 "Spearman": metrics["Spearman"],
