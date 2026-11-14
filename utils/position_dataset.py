@@ -8,7 +8,8 @@ so no position can appear in more than one of train / val / test.
 import numpy as np
 import torch
 from scipy.ndimage import distance_transform_edt
-from stable_pretraining.data import dataset_stats
+
+from utils.embedding_probing.experiments.shared.normalization import normalise_images
 
 SPLITS = ("train", "val", "test")
 
@@ -60,11 +61,8 @@ def encode_frames(model, frames, device):
   scaled to [0, 1], then ImageNet-normalised.
   Returns a float array of shape (N, latent_dim).
   """
-  mean = torch.tensor(dataset_stats.ImageNet["mean"]).view(1, 3, 1, 1)
-  std = torch.tensor(dataset_stats.ImageNet["std"]).view(1, 3, 1, 1)
-
-  images = torch.from_numpy(np.asarray(frames)).permute(0, 3, 1, 2).float() / 255.0
-  images = ((images - mean) / std).unsqueeze(1).to(device)  # (N, Time=1, 3, H, W)
+  images = torch.from_numpy(np.asarray(frames)).permute(0, 3, 1, 2)
+  images = normalise_images(images).unsqueeze(1).to(device)  # (N, Time=1, 3, H, W)
 
   with torch.no_grad():
     embeddings = model.encode({"pixels": images})["emb"]  # (N, 1, latent_dim)
