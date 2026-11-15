@@ -5,6 +5,8 @@ CEM planning with the JEPA model, following the LeWM evaluation
 A plan is HORIZON blocks. One block is BLOCK environment actions, stored as one vector of
 2 * BLOCK numbers in the z-scored action space the model was trained in.
 """
+import time
+
 import numpy as np
 import torch
 
@@ -41,7 +43,7 @@ def jepa_cost(final_latents, goal_latent):
   return ((final_latents - goal_latent) ** 2).sum(dim=1)
 
 
-def plan(model, latent, cost, generator, device, horizon=HORIZON):
+def plan(model, latent, cost, generator, device, horizon=HORIZON, num_samples=NUM_SAMPLES):
   """
   Cross-entropy method. cost(final_latents) gives one cost per candidate (lower is better).
   Returns the final mean of the action distribution, shape (horizon, ACTION_DIM).
@@ -50,7 +52,7 @@ def plan(model, latent, cost, generator, device, horizon=HORIZON):
   var = VAR_SCALE * torch.ones(horizon, ACTION_DIM, device=device)
   with torch.no_grad():
     for _ in range(ITERATIONS):
-      candidates = torch.randn(NUM_SAMPLES, horizon, ACTION_DIM, generator=generator, device=device) * var + mean
+      candidates = torch.randn(num_samples, horizon, ACTION_DIM, generator=generator, device=device) * var + mean
       candidates[0] = mean  # like the original solver, the current mean is always a candidate
       costs = cost(rollout(model, latent, candidates))
       elites = candidates[torch.topk(costs, TOP_K, largest=False).indices]
@@ -64,14 +66,19 @@ def to_environment_actions(plan_blocks, action_mean, action_std):
   return np.clip(actions, -1.0, 1.0).astype(np.float32)
 
 
-def run_episode(env, model, device, start, goal, make_cost, action_mean, action_std, budget_steps, seed):
+def run_episode(env, model, device, start, goal, make_cost, action_mean, action_std, budget_steps, seed,
+                horizon=HORIZON, execute_blocks=HORIZON, num_samples=NUM_SAMPLES, trace=False, planner=plan):
   """
   Plans with CEM and acts in the real environment until the goal is reached (the environment's own
-  goal test, within 16 px) or budget_steps environment steps are used. All HORIZON planned blocks are
-  executed before replanning, like receding_horizon in the LeWM evaluation.
+  goal test, within 16 px) or budget_steps environment steps are used. The first execute_blocks of the
+  horizon planned blocks are executed before replanning (all of them in the LeWM evaluation, receding_horizon 5).
 
-  make_cost(goal_latent, goal_xy) returns the cost function used by CEM for this goal.
-  Returns a dict: success, steps used, final distance to the goal and the smallest distance reached.
+  make_cost(goal_latent, goal_xy) returns the cost function used by CEM for this goal. planner is plan (CEM)
+  or any function with the same arguments that returns blocks (n, ACTION_DIM), e.g. plan_mppi, plan_icem or a
+  latent search (utils/latent_search.py).
+  Returns a dict: success, steps used, final distance to the goal, the smallest distance reached and the
+  seconds spent planning.
+  With trace=True it also returns path: the agent position after every environment step (start first).
   """
   generator = torch.Generator(device=device).manual_seed(seed)
 
@@ -80,20 +87,31 @@ def run_episode(env, model, device, start, goal, make_cost, action_mean, action_
   cost = make_cost(goal_latent, goal)
 
   env.reset(options={"state": list(start), "target_state": list(goal)})
+  positions = [tuple(float(v) for v in start)]
   steps, closest, success = 0, float(np.linalg.norm(np.asarray(start) - np.asarray(goal))), False
+  planning_seconds = 0.0
   while steps < budget_steps and not success:
     latent = torch.tensor(encode_frames(model, np.stack([env.render()]), device)[0], device=device)
-    blocks = plan(model, latent, cost, generator, device)
-    for action in to_environment_actions(blocks, action_mean, action_std):
+    started = time.perf_counter()
+    blocks = planner(model, latent, cost, generator, device, horizon, num_samples)
+    if torch.device(device).type == "cuda":
+      torch.cuda.synchronize()
+    planning_seconds += time.perf_counter() - started
+    for action in to_environment_actions(blocks[:execute_blocks], action_mean, action_std):
       _, _, success, _, info = env.step(action)
       steps += 1
+      positions.append(tuple(float(v) for v in info["proprio"]))
       closest = min(closest, info["distance_to_target"])
       if success or steps >= budget_steps:
         break
 
-  return {
+  result = {
     "success": bool(success),
     "steps": steps,
     "final_distance": float(info["distance_to_target"]) if steps else closest,
     "closest_distance": closest,
+    "plan_seconds": planning_seconds,
   }
+  if trace:
+    result["path"] = positions
+  return result

@@ -86,6 +86,30 @@ def test_run_episode_stops_at_the_budget_and_reports_distances():
                        make_cost=lambda goal, xy: (lambda final: jepa_cost(final, goal)),
                        action_mean=np.zeros(2), action_std=np.ones(2), budget_steps=30, seed=0)
 
-  assert set(result) == {"success", "steps", "final_distance", "closest_distance"}
+  assert set(result) == {"success", "steps", "final_distance", "closest_distance", "plan_seconds"}
   assert 0 < result["steps"] <= 30
   assert result["closest_distance"] <= 40  # the start distance
+
+
+def test_run_episode_can_replan_after_fewer_blocks_and_trace_the_path():
+  from stable_worldmodel.envs.two_room import TwoRoomEnv
+  from utils.cem_planner import run_episode
+
+  class StubJepa(AdditiveModel):
+    def encode(self, info):
+      return {"emb": info["pixels"].mean(dim=(2, 3, 4)).unsqueeze(-1)}
+
+  plans = []
+  counting_planner = lambda *a, **k: plans.append(1) or plan(*a, **k)  # also checks that run_episode takes any planner
+  env = TwoRoomEnv()
+  env.reset()
+  kwargs = dict(start=(40, 150), goal=(200, 20), make_cost=lambda goal, xy: (lambda final: jepa_cost(final, goal)),
+                action_mean=np.zeros(2), action_std=np.ones(2), budget_steps=2 * BLOCK, seed=0, trace=True,
+                planner=counting_planner)
+  all_blocks = run_episode(env, StubJepa(), "cpu", **kwargs)
+  replans_before = len(plans)
+  one_block = run_episode(env, StubJepa(), "cpu", execute_blocks=1, **kwargs)
+
+  assert replans_before == 1 and len(plans) - replans_before == 2  # 2 blocks of steps: one plan, or one plan per block
+  assert len(all_blocks["path"]) == all_blocks["steps"] + 1 == 2 * BLOCK + 1
+  assert all_blocks["path"][0] == (40.0, 150.0)
