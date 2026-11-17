@@ -46,6 +46,8 @@ from utils.euclid_distance_ml_model_training_utils import (
     convert_pickle_to_parquet,
     evaluate_model,
     load_features,
+    load_split,
+    resolve_input_path,
     split_three_way,
     train_mlp,
     train_xgboost,
@@ -243,27 +245,38 @@ def main():
     print(f"Val size:      {args.val_size}")
     print(f"Test size:     {1.0 - args.train_size - args.val_size}")
 
-    # 1. Load data
-    parquet_path = args.input.replace(".pkl", ".parquet")
-    if os.path.exists(parquet_path):
-        print(f"Using existing parquet: {parquet_path}")
-    else:
-        parquet_path = convert_pickle_to_parquet(args.input)
-        print(f"Data converted to: {parquet_path}")
-
-    print("Loading data...")
-    X, y = load_features(parquet_path, target_col="heuristic",
-                         device=device, enhanced=args.enhanced)
-    print(f"Features: {tuple(X.shape)} "
-          f"({X.numel() * X.element_size() / 1e6:.1f} MB on {X.device})")
-
-    # 2. Split into train / val / test
-    print("Splitting data into train/val/test sets...")
-    x_train, x_val, x_test, y_train, y_val, y_test = split_three_way(
-        X, y, train_size=args.train_size, val_size=args.val_size, seed=args.seed
+    # 1. Resolve input (file or split directory)
+    is_split_dir = os.path.isdir(args.input) and os.path.exists(
+        os.path.join(args.input, "split_config.json")
     )
-    del X, y
-    print(f"Train: {len(x_train)}, Val: {len(x_val)}, Test: {len(x_test)}")
+
+    if is_split_dir:
+        print(f"Loading pre-split data from: {args.input}")
+        print("Loading data...")
+        x_train, x_val, x_test, y_train, y_val, y_test = load_split(
+            args.input, device=device
+        )
+        print(f"Train: {len(x_train)}, Val: {len(x_val)}, Test: {len(x_test)}")
+    else:
+        parquet_path = resolve_input_path(args.input)
+        if os.path.exists(parquet_path):
+            print(f"Using existing parquet: {parquet_path}")
+        else:
+            parquet_path = convert_pickle_to_parquet(args.input)
+            print(f"Data converted to: {parquet_path}")
+
+        print("Loading data...")
+        X, y = load_features(parquet_path, target_col="heuristic",
+                             device=device, enhanced=args.enhanced)
+        print(f"Features: {tuple(X.shape)} "
+              f"({X.numel() * X.element_size() / 1e6:.1f} MB on {X.device})")
+
+        print("Splitting data into train/val/test sets...")
+        x_train, x_val, x_test, y_train, y_val, y_test = split_three_way(
+            X, y, train_size=args.train_size, val_size=args.val_size, seed=args.seed
+        )
+        del X, y
+        print(f"Train: {len(x_train)}, Val: {len(x_val)}, Test: {len(x_test)}")
 
     # 3. Run CEM search per model (on val set), final eval on test set
     results_summary = {}

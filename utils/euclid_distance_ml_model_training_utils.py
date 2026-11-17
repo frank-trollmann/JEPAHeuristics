@@ -132,6 +132,55 @@ def split_three_way(
     )
 
 
+def load_split(directory: str, device: str = "cuda") -> tuple:
+    """
+    Load a train/val/test split from a directory produced by ``scripts.split_dataset``.
+
+    Expects ``{directory}/{train,val,test}.parquet`` and ``{directory}/split_config.json``.
+
+    Returns:
+        x_train, x_val, x_test, y_train, y_val, y_test as torch tensors.
+    """
+    def _load(path: str):
+        df = pl.read_parquet(path)
+        feature_cols = [c for c in df.columns if c != "heuristic"]
+        X = np.concatenate([_column_matrix(df[c]) for c in feature_cols], axis=1)
+        y = np.array(df["heuristic"].to_numpy(), dtype=np.float32)
+        del df
+        return (
+            torch.from_numpy(X).to(device, non_blocking=True),
+            torch.from_numpy(y).to(device, non_blocking=True),
+        )
+
+    x_train, y_train = _load(os.path.join(directory, "train.parquet"))
+    x_val,   y_val   = _load(os.path.join(directory, "val.parquet"))
+    x_test,  y_test  = _load(os.path.join(directory, "test.parquet"))
+    return x_train, x_val, x_test, y_train, y_val, y_test
+
+
+def resolve_input_path(args_input: str) -> str:
+    """
+    Resolve ``--input`` to a parquet file path.
+
+    If ``args_input`` points to a directory containing ``split_config.json``
+    (produced by ``scripts.split_dataset``), returns the path to ``train.parquet``
+    inside that directory.  Otherwise falls back to the existing .pkl → .parquet
+    resolution.
+    """
+    if os.path.isdir(args_input):
+        config_path = os.path.join(args_input, "split_config.json")
+        if os.path.exists(config_path):
+            train_path = os.path.join(args_input, "train.parquet")
+            if os.path.exists(train_path):
+                return train_path
+    # Legacy: .pkl → .parquet
+    parquet_path = args_input.replace(".pkl", ".parquet")
+    if os.path.exists(parquet_path):
+        return parquet_path
+    converted = convert_pickle_to_parquet(args_input)
+    return converted
+
+
 class LinearRegressor:
     """
     Ordinary least squares solved on the GPU.
