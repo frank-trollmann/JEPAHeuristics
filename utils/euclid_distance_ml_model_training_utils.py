@@ -237,7 +237,8 @@ class LinearRegressor:
 def train_xgboost(X, y, n_estimators: int = 500, max_depth: int = 6,
                   learning_rate: float = 0.1, device: str = "cuda",
                   max_rows: int = 0, standardize: bool = True,
-                  subsample: float = 0.8, colsample_bytree: float = 0.8):
+                  subsample: float = 0.8, colsample_bytree: float = 0.8,
+                  n_jobs: int = 1):
     """
     Gradient boosted trees on the GPU (XGBoost `tree_method="hist"`).
 
@@ -250,7 +251,8 @@ def train_xgboost(X, y, n_estimators: int = 500, max_depth: int = 6,
     """
     # On macOS, torch and xgboost ship two libomp runtimes; spawning more than
     # one OpenMP thread then crashes with "OMP: Error #179". Linux is unaffected.
-    n_jobs = 1 if sys.platform == "darwin" else -1
+    if n_jobs <= 0:
+        n_jobs = 1 if sys.platform == "darwin" else -1
 
     num_rows = X.shape[0]
     if 0 < max_rows < num_rows:
