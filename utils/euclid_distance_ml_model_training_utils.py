@@ -105,6 +105,32 @@ def split_data(X, y, train_size: float = 0.8, seed: int | None = None):
 
     return X[train_idx], X[test_idx], y[train_idx], y[test_idx]
 
+def split_three_way(
+    X, y, train_size: float = 0.7, val_size: float = 0.15, seed: int | None = None
+):
+    """
+    Shuffles and splits on the device into train / val / test.
+
+    ``train_size + val_size`` must be < 1; the remainder becomes the test set.
+
+    Returns:
+        x_train, x_val, x_test, y_train, y_val, y_test as torch tensors.
+    """
+    generator = None
+    if seed is not None:
+        generator = torch.Generator(device=X.device).manual_seed(seed)
+
+    n = X.shape[0]
+    permutation = torch.randperm(n, device=X.device, generator=generator)
+    train_idx = permutation[: int(n * train_size)]
+    val_idx = permutation[int(n * train_size) : int(n * (train_size + val_size))]
+    test_idx = permutation[int(n * (train_size + val_size)) :]
+
+    return (
+        X[train_idx], X[val_idx], X[test_idx],
+        y[train_idx], y[val_idx], y[test_idx],
+    )
+
 
 class LinearRegressor:
     """

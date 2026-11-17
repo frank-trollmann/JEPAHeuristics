@@ -9,6 +9,14 @@ import numpy as np
 import torch
 import xgboost as xgb
 
+from utils.cem_optimizer import (
+    CEMOptimizer,
+    GenerationResult,
+    make_xgb_param_configs,
+    make_mlp_param_configs,
+    xgb_sample_to_kwargs,
+    mlp_sample_to_kwargs,
+)
 from utils.euclid_distance_ml_model_training_utils import (
     LinearRegressor,
     Standardizer,
@@ -17,6 +25,7 @@ from utils.euclid_distance_ml_model_training_utils import (
     load_features,
     save_results,
     split_data,
+    split_three_way,
     train_mlp,
     train_xgboost,
 )
@@ -53,18 +62,18 @@ def generate_combinations(grids):
 
 
 # =============================================================================
-# Hyperparameter Search Functions
+# Hyperparameter Search Functions — Grid Search
 # =============================================================================
 
-def grid_search_xgboost(x_train, y_train, x_test, y_test, param_grids, device, n_jobs=1, max_rows=0):
-    """Grid search for XGBoost hyperparameters."""
+def grid_search_xgboost(x_train, y_train, x_val, y_val, param_grids, device, n_jobs=1, max_rows=0):
+    """Grid search for XGBoost hyperparameters. Evaluates on val set."""
     best_mae = float("inf")
     best_params = None
     best_model = None
     all_results = []
 
     print("\n" + "=" * 60)
-    print("XGBoost Hyperparameter Tuning")
+    print("XGBoost Hyperparameter Tuning (grid search, val set)")
     print("=" * 60)
 
     combinations = generate_combinations(param_grids)
@@ -80,7 +89,7 @@ def grid_search_xgboost(x_train, y_train, x_test, y_test, param_grids, device, n
                 max_rows=max_rows,
                 **params
             )
-            metrics = evaluate_model(model, x_test, y_test)
+            metrics = evaluate_model(model, x_val, y_val)
             mae = metrics["MAE"]
             r2 = metrics["R2"]
 
@@ -110,15 +119,15 @@ def grid_search_xgboost(x_train, y_train, x_test, y_test, param_grids, device, n
     return best_model, best_params, all_results
 
 
-def grid_search_mlp(x_train, y_train, x_test, y_test, param_grids):
-    """Grid search for MLP hyperparameters."""
+def grid_search_mlp(x_train, y_train, x_val, y_val, param_grids):
+    """Grid search for MLP hyperparameters. Evaluates on val set."""
     best_mae = float("inf")
     best_params = None
     best_model = None
     all_results = []
 
     print("\n" + "=" * 60)
-    print("MLP Hyperparameter Tuning")
+    print("MLP Hyperparameter Tuning (grid search, val set)")
     print("=" * 60)
 
     combinations = generate_combinations(param_grids)
@@ -132,7 +141,7 @@ def grid_search_mlp(x_train, y_train, x_test, y_test, param_grids):
                 x_train, y_train,
                 **params
             )
-            metrics = evaluate_model(model, x_test, y_test)
+            metrics = evaluate_model(model, x_val, y_val)
             mae = metrics["MAE"]
             r2 = metrics["R2"]
 
@@ -163,6 +172,111 @@ def grid_search_mlp(x_train, y_train, x_test, y_test, param_grids):
 
 
 # =============================================================================
+# Hyperparameter Search Functions — CEM
+# =============================================================================
+
+def cem_search_xgboost(x_train, y_train, x_val, y_val,
+                       generations: int = 10, batch_size: int = 10,
+                       elite_fraction: float = 0.2, device: str = "cuda",
+                       n_jobs: int = 1, max_rows: int = 0,
+                       seed: int | None = None) -> dict:
+    """Run CEM hyperparameter search for XGBoost. Evaluates on val set."""
+    param_configs = make_xgb_param_configs()
+    optimizer = CEMOptimizer(param_configs, elite_fraction=elite_fraction,
+                             rng=np.random.default_rng(seed))
+    all_results: list[dict] = []
+
+    for gen in range(generations):
+        samples = optimizer.sample(batch_size=batch_size)
+        gen_scores: list[GenerationResult] = []
+
+        for i, sample in enumerate(samples):
+            kwargs = xgb_sample_to_kwargs(sample)
+            kwargs["device"] = device
+            kwargs["n_jobs"] = n_jobs
+            kwargs["max_rows"] = max_rows
+            try:
+                model = train_xgboost(x_train, y_train, **kwargs)
+                metrics = evaluate_model(model, x_val, y_val)
+                mae = metrics["MAE"]
+                print(f"    [{gen+1}/{generations}] "
+                      f"cand {i+1}/{batch_size}: MAE={mae:.4f}  "
+                      f"{{k:v for k,v in sample.items()}}", flush=True)
+                gen_scores.append(GenerationResult(params=sample, score=mae))
+                all_results.append({
+                    "params": sample,
+                    "MAE": mae,
+                    "MSE": metrics["MSE"],
+                    "R2": metrics["R2"],
+                    "Pearson": metrics["Pearson"],
+                    "Spearman": metrics["Spearman"],
+                })
+            except Exception as exc:
+                print(f"    [{gen+1}/{generations}] "
+                      f"cand {i+1}/{batch_size}: ERROR {exc}", flush=True)
+                gen_scores.append(GenerationResult(params=sample, score=float("inf")))
+
+        optimizer.update(gen_scores)
+        print(f"    Generation {gen+1} complete. "
+              f"Best MAE so far: {optimizer.best_score():.4f}", flush=True)
+
+    return {
+        "best_params": optimizer.best_params(),
+        "all_results": all_results,
+    }
+
+
+def cem_search_mlp(x_train, y_train, x_val, y_val,
+                   generations: int = 10, batch_size: int = 10,
+                   elite_fraction: float = 0.2,
+                   base_epochs: int = 100, base_batch_size: int = 4096,
+                   seed: int | None = None) -> dict:
+    """Run CEM hyperparameter search for MLP. Evaluates on val set."""
+    param_configs = make_mlp_param_configs()
+    optimizer = CEMOptimizer(param_configs, elite_fraction=elite_fraction,
+                             rng=np.random.default_rng(seed))
+    all_results: list[dict] = []
+
+    for gen in range(generations):
+        samples = optimizer.sample(batch_size=batch_size)
+        gen_scores: list[GenerationResult] = []
+
+        for i, sample in enumerate(samples):
+            kwargs = mlp_sample_to_kwargs(sample)
+            kwargs["epochs"] = sample.get("epochs", base_epochs)
+            kwargs["batch_size"] = base_batch_size
+            try:
+                model = train_mlp(x_train, y_train, **kwargs)
+                metrics = evaluate_model(model, x_val, y_val)
+                mae = metrics["MAE"]
+                print(f"    [{gen+1}/{generations}] "
+                      f"cand {i+1}/{batch_size}: MAE={mae:.4f}  "
+                      f"{{k:v for k,v in sample.items()}}", flush=True)
+                gen_scores.append(GenerationResult(params=sample, score=mae))
+                all_results.append({
+                    "params": sample,
+                    "MAE": mae,
+                    "MSE": metrics["MSE"],
+                    "R2": metrics["R2"],
+                    "Pearson": metrics["Pearson"],
+                    "Spearman": metrics["Spearman"],
+                })
+            except Exception as exc:
+                print(f"    [{gen+1}/{generations}] "
+                      f"cand {i+1}/{batch_size}: ERROR {exc}", flush=True)
+                gen_scores.append(GenerationResult(params=sample, score=float("inf")))
+
+        optimizer.update(gen_scores)
+        print(f"    Generation {gen+1} complete. "
+              f"Best MAE so far: {optimizer.best_score():.4f}", flush=True)
+
+    return {
+        "best_params": optimizer.best_params(),
+        "all_results": all_results,
+    }
+
+
+# =============================================================================
 # Main Training Pipeline
 # =============================================================================
 
@@ -184,15 +298,18 @@ def main():
         help="Which model to train"
     )
     parser.add_argument(
-        "--train_size",
-        type=float,
-        default=0.8,
-        help="Training set proportion"
+        "--train-size",
+        type=float, default=0.7,
+        help="Training set proportion (default 0.7)"
+    )
+    parser.add_argument(
+        "--val-size",
+        type=float, default=0.15,
+        help="Validation set proportion (default 0.15)"
     )
     parser.add_argument(
         "--epochs",
-        type=int,
-        default=100,
+        type=int, default=100,
         help="Epochs for MLP"
     )
     parser.add_argument(
@@ -209,7 +326,7 @@ def main():
     parser.add_argument(
         "--seed",
         type=int, default=None,
-        help="Optional seed for a reproducible train/test split"
+        help="Optional seed for a reproducible split"
     )
     parser.add_argument(
         "--xgb_max_rows",
@@ -218,11 +335,16 @@ def main():
     )
     parser.add_argument(
         "--tune",
-        action="store_true",
-        help="Enable hyperparameter tuning for XGBoost and MLP"
+        type=str,
+        default=None,
+        choices=["grid", "cem"],
+        help="Enable hyperparameter tuning (grid search or CEM)"
     )
 
     args = parser.parse_args()
+
+    if args.train_size + args.val_size >= 1.0:
+        parser.error("--train-size + --val-size must be < 1.0")
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     if device == "cuda" and not torch.cuda.is_available():
@@ -231,11 +353,14 @@ def main():
     n_jobs = 1 if sys.platform == "darwin" else -1
 
     print("Starting GPU Training Pipeline...")
-    print(f"Device: {device}")
+    print(f"Device:     {device}")
     if device == "cuda":
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
+        print(f"GPU:        {torch.cuda.get_device_name(0)}")
+    print(f"Train size: {args.train_size}")
+    print(f"Val size:   {args.val_size}")
+    print(f"Test size:  {1.0 - args.train_size - args.val_size}")
     if args.tune:
-        print("Hyperparameter tuning: ENABLED")
+        print(f"Tuning:     {args.tune}")
 
     # 1. Convert Pickle to Parquet (if not already done)
     parquet_path = args.input.replace(".pkl", ".parquet")
@@ -251,13 +376,13 @@ def main():
     print(f"Features: {tuple(X.shape)} "
           f"({X.numel() * X.element_size() / 1e6:.1f} MB on {X.device})")
 
-    # 3. Split Data (on the device)
-    print("Splitting data into train/test sets...")
-    x_train, x_test, y_train, y_test = split_data(
-        X, y, train_size=args.train_size, seed=args.seed
+    # 3. Split Data into train / val / test
+    print("Splitting data into train/val/test sets...")
+    x_train, x_val, x_test, y_train, y_val, y_test = split_three_way(
+        X, y, train_size=args.train_size, val_size=args.val_size, seed=args.seed
     )
     del X, y
-    print(f"Train size: {len(x_train)}, Test size: {len(x_test)}")
+    print(f"Train: {len(x_train)}, Val: {len(x_val)}, Test: {len(x_test)}")
 
     # 4. Model Training & Evaluation
     results_summary = {}
@@ -270,12 +395,12 @@ def main():
         print(f"Linear Results: {results_summary['Linear']}")
 
     if args.model in ["xgb", "all"]:
-        if args.tune:
+        if args.tune == "grid":
             print("\n" + "=" * 60)
-            print("XGBoost Hyperparameter Tuning")
+            print("XGBoost Hyperparameter Tuning (grid search)")
             print("=" * 60)
             model_xgb, best_params, all_results = grid_search_xgboost(
-                x_train, y_train, x_test, y_test,
+                x_train, y_train, x_val, y_val,
                 XGB_PARAM_GRIDS, device, n_jobs=n_jobs,
                 max_rows=args.xgb_max_rows
             )
@@ -283,6 +408,26 @@ def main():
                 "best_params": best_params,
                 "all_results": all_results,
             }
+        elif args.tune == "cem":
+            print("\n" + "=" * 60)
+            print("XGBoost Hyperparameter Tuning (CEM)")
+            print("=" * 60)
+            xgb_res = cem_search_xgboost(
+                x_train, y_train, x_val, y_val,
+                device=device, n_jobs=n_jobs,
+                max_rows=args.xgb_max_rows,
+                seed=args.seed,
+            )
+            tune_results["XGBoost"] = {
+                "best_params": xgb_res["best_params"],
+                "all_results": xgb_res["all_results"],
+            }
+            model_xgb = train_xgboost(
+                torch.cat([x_train, x_val], dim=0),
+                torch.cat([y_train, y_val], dim=0),
+                device=device, n_jobs=n_jobs, max_rows=args.xgb_max_rows,
+                **xgb_sample_to_kwargs(xgb_res["best_params"]),
+            )
         else:
             print("\nTraining XGBoost...")
             model_xgb = train_xgboost(
@@ -294,18 +439,39 @@ def main():
         print(f"XGBoost Results: {results_summary['XGBoost']}")
 
     if args.model in ["mlp", "all"]:
-        if args.tune:
+        if args.tune == "grid":
             print("\n" + "=" * 60)
-            print("MLP Hyperparameter Tuning")
+            print("MLP Hyperparameter Tuning (grid search)")
             print("=" * 60)
             model_mlp, best_params, all_results = grid_search_mlp(
-                x_train, y_train, x_test, y_test,
+                x_train, y_train, x_val, y_val,
                 MLP_PARAM_GRIDS
             )
             tune_results["MLP"] = {
                 "best_params": best_params,
                 "all_results": all_results,
             }
+        elif args.tune == "cem":
+            print("\n" + "=" * 60)
+            print("MLP Hyperparameter Tuning (CEM)")
+            print("=" * 60)
+            mlp_res = cem_search_mlp(
+                x_train, y_train, x_val, y_val,
+                base_epochs=args.epochs,
+                base_batch_size=args.batch_size,
+                seed=args.seed,
+            )
+            tune_results["MLP"] = {
+                "best_params": mlp_res["best_params"],
+                "all_results": mlp_res["all_results"],
+            }
+            best_kwargs = mlp_sample_to_kwargs(mlp_res["best_params"])
+            best_kwargs.update({"epochs": args.epochs, "batch_size": args.batch_size})
+            model_mlp = train_mlp(
+                torch.cat([x_train, x_val], dim=0),
+                torch.cat([y_train, y_val], dim=0),
+                **best_kwargs,
+            )
         else:
             print("\nTraining MLP Neural Net...")
             model_mlp = train_mlp(
@@ -320,7 +486,7 @@ def main():
         print(f"MLP Results: {results_summary['MLP']}")
 
     print("\n" + "=" * 30)
-    print("FINAL SUMMARY")
+    print("FINAL SUMMARY (test set)")
     print("=" * 30)
     for model, metrics in results_summary.items():
         print(
