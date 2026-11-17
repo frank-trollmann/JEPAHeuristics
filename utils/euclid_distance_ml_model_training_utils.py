@@ -175,7 +175,7 @@ def resolve_input_path(args_input: str) -> str:
                 return train_path
     # Legacy: .pkl → .parquet
     parquet_path = args_input.replace(".pkl", ".parquet")
-    if os.path.exists(parquet_path):
+    if os.path.isfile(parquet_path):
         return parquet_path
     converted = convert_pickle_to_parquet(args_input)
     return converted

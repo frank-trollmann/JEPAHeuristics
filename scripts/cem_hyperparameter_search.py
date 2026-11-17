@@ -267,7 +267,7 @@ def main():
 
         print("Loading data...")
         X, y = load_features(parquet_path, target_col="heuristic",
-                             device=device, enhanced=args.enhanced)
+                             device=device)
         print(f"Features: {tuple(X.shape)} "
               f"({X.numel() * X.element_size() / 1e6:.1f} MB on {X.device})")
 
