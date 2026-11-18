@@ -33,6 +33,9 @@ from typing import Any
 import numpy as np
 import torch
 from scipy.stats import pearsonr, spearmanr
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 from utils.euclid_distance_ml_model_training_utils import (
     load_features,
@@ -137,8 +140,10 @@ def train_mlp_ablation(
     lr: float = 1e-3,
     seed: int | None = None,
     device: str = "cuda",
-) -> torch.nn.Module:
-    """Train an AblationMLP and return the fitted model."""
+    val_X: torch.Tensor | None = None,
+    val_y: torch.Tensor | None = None,
+) -> tuple[torch.nn.Module, list[float], list[float]]:
+    """Train an AblationMLP and return (model, train_losses, val_losses)."""
     if seed is not None:
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
@@ -174,16 +179,33 @@ def train_mlp_ablation(
     # Training loop
     model.train()
     n = X_std.shape[0]
+    train_losses: list[float] = []
+    val_losses: list[float] = []
+
+    # Prepare validation data
+    val_std: torch.Tensor | None = None
+    if val_X is not None:
+        val_std = ((val_X - mean) / std).to(device)
+        val_y_flat = val_y.reshape(-1).to(device)
+
     for epoch in range(epochs):
         permutation = torch.randperm(n, device=device)
+        epoch_loss = 0.0
         for start in range(0, n, batch_size):
             idx = permutation[start:start + batch_size]
             optimizer.zero_grad()
             loss = criterion(model(X_std[idx]), y_flat[idx])
             loss.backward()
             optimizer.step()
+            epoch_loss += loss.item() * idx.shape[0]
+        train_losses.append(epoch_loss / n)
 
-    return model
+        # Validation loss
+        if val_std is not None:
+            with torch.no_grad():
+                val_losses.append(criterion(model(val_std), val_y_flat).item())
+
+    return model, train_losses, val_losses
 
 
 def evaluate(
@@ -400,6 +422,28 @@ def get_ablation_configs() -> list[dict[str, Any]]:
     return configs
 
 
+def _plot_curves(
+    train_losses: list[float],
+    val_losses: list[float],
+    config_name: str,
+    output_dir: str,
+    epochs: int,
+) -> None:
+    """Plot and save training/validation loss curves."""
+    fig, ax = plt.subplots(figsize=(8, 5))
+    iters = list(range(len(train_losses)))
+    ax.plot(iters, train_losses, 'b-', label='Train MSE', linewidth=1.5)
+    ax.plot(iters, val_losses, 'r-', label='Val MSE', linewidth=1.5)
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('MSE')
+    ax.set_title(f'{config_name} — Loss Curves')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    path = os.path.join(output_dir, f'{config_name}_curves.png')
+    fig.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -438,11 +482,15 @@ def main():
     X, y = load_features(args.input, device=device)
     print(f"Features: {tuple(X.shape)}")
 
-    # Split
-    X_train, X_test, y_train, y_test = split_data(
+    # Split: 80% train, 20% test
+    X_train_full, X_test, y_train_full, y_test = split_data(
         X, y, train_size=0.8, seed=args.seed
     )
-    print(f"Train: {len(X_train)}, Test: {len(X_test)}")
+    # Further split train into 80% train / 20% val (within the 80%)
+    X_train, X_val, y_train, y_val = split_data(
+        X_train_full, y_train_full, train_size=0.8, seed=args.seed
+    )
+    print(f"Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
 
     # Get configurations
     configs = get_ablation_configs()
@@ -450,6 +498,8 @@ def main():
     print("=" * 70)
 
     results: list[dict[str, Any]] = []
+    curves_dir = os.path.join(args.output_dir, "curves")
+    os.makedirs(curves_dir, exist_ok=True)
 
     for cfg in configs:
         print(f"\n[{cfg['name']}] {cfg['description']}")
@@ -458,9 +508,10 @@ def main():
               f"residual={cfg['residual']}, layernorm={cfg['layer_norm']}")
 
         seed_results: list[dict[str, float]] = []
+        seed_curves: list[tuple[list[float], list[float]]] = []
 
         for s in range(args.seeds):
-            model = train_mlp_ablation(
+            model, train_losses, val_losses = train_mlp_ablation(
                 X_train, y_train,
                 hidden_layers=cfg["hidden_layers"],
                 activation=cfg["activation"],
@@ -473,12 +524,21 @@ def main():
                 lr=args.lr,
                 seed=args.seed + s,
                 device=device,
+                val_X=X_val,
+                val_y=y_val,
             )
             metrics = evaluate(model, X_test, y_test, device=device)
             seed_results.append(metrics)
+            seed_curves.append((train_losses, val_losses))
             print(f"    seed {s}: MAE={metrics['MAE']:.4f}  "
                   f"R²={metrics['R2']:.4f}  "
                   f"Pearson={metrics['Pearson']:.4f}")
+
+            # Plot and save curves for first seed only (keep files manageable)
+            if s == 0:
+                _plot_curves(
+                    train_losses, val_losses, cfg["name"], curves_dir, args.epochs
+                )
 
         # Aggregate
         agg = {}
@@ -500,13 +560,14 @@ def main():
         })
         results.append(agg)
 
-        del model, seed_results
+        del model, seed_results, seed_curves
 
     # Save results
     results_path = os.path.join(args.output_dir, f"{timestamp}_ablation_results.json")
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\nResults saved to: {results_path}")
+    print(f"Curves saved to: {curves_dir}")
 
     # Print summary table
     print("\n" + "=" * 70)
