@@ -332,18 +332,26 @@ class Standardizer:
 
 
 def train_mlp(X, y, hidden_layers=(64, 32), epochs: int = 100,
-              batch_size: int = 4096, lr: float = 1e-3):
+              batch_size: int = 4096, lr: float = 1e-3,
+              x_val=None, y_val=None):
     """
     Trains a Multi-Layer Perceptron with PyTorch on the device of `X`.
 
     The latent features are standardized on the training split; without this
     the network barely beats predicting the mean.
+
+    When ``x_val`` and ``y_val`` are provided, each epoch is evaluated on the
+    validation split and the model state with the lowest validation MAE is
+    returned (together with a history dict and the best MAE).  Otherwise the
+    final model state is returned as before.
     """
     device = X.device
     y = y.reshape(-1, 1)
 
     mean = X.mean(dim=0)
     std = X.std(dim=0).clamp_min(1e-6)
+    standardizer_mean = mean.cpu().numpy()
+    standardizer_std = std.cpu().numpy()
 
     layers = [_Standardize(mean, std)]
     prev_dim = X.shape[1]
@@ -360,17 +368,65 @@ def train_mlp(X, y, hidden_layers=(64, 32), epochs: int = 100,
     criterion = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    model.train()
-    for _ in range(epochs):
-        permutation = torch.randperm(X.shape[0], device=device)
-        for start in range(0, X.shape[0], batch_size):
-            indices = permutation[start:start + batch_size]
+    X_std = model[0](X)  # pre-standardize train input
 
-            optimizer.zero_grad()
-            loss = criterion(model(X[indices]), y[indices])
-            loss.backward()
-            optimizer.step()
+    history = None
+    best_state = None
+    best_mae = float("inf")
+    last_state = None
 
+    if x_val is not None and y_val is not None:
+        y_val = y_val.reshape(-1, 1)
+        X_val_std = model[0](x_val)
+        history = []
+        n = X.shape[0]
+
+        for epoch in range(epochs):
+            model.train()
+            perm = torch.randperm(n, device=device)
+            for start in range(0, n, batch_size):
+                idx = perm[start:start + batch_size]
+                optimizer.zero_grad()
+                loss = criterion(model(X_std[idx]), y[idx])
+                loss.backward()
+                optimizer.step()
+
+            # Validation eval (no grads, eval mode)
+            model.eval()
+            with torch.no_grad():
+                val_pred = model(X_val_std).squeeze(1)
+            val_error = val_pred - y_val.squeeze(1)
+            val_mae = val_error.abs().mean().item()
+
+            history.append({"epoch": epoch + 1, "val_mae": val_mae})
+
+            last_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            if val_mae < best_mae:
+                best_mae = val_mae
+                best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+
+        # Return best checkpoint state, not final epoch state
+        if best_state is not None:
+            model.load_state_dict(best_state)
+
+    else:
+        # Original behaviour: train for all epochs, return final state
+        model.train()
+        for _ in range(epochs):
+            perm = torch.randperm(X.shape[0], device=device)
+            for start in range(0, X.shape[0], batch_size):
+                idx = perm[start:start + batch_size]
+                optimizer.zero_grad()
+                loss = criterion(model(X_std[idx]), y[idx])
+                loss.backward()
+                optimizer.step()
+
+    # Attach standardizer stats for later use
+    model.standardizer_mean = standardizer_mean
+    model.standardizer_std = standardizer_std
+
+    if history is not None:
+        return model, history, best_mae
     return model
 
 

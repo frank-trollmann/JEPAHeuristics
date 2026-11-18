@@ -122,7 +122,13 @@ def grid_search_xgboost(x_train, y_train, x_val, y_val, param_grids, device, n_j
 
 
 def grid_search_mlp(x_train, y_train, x_val, y_val, param_grids):
-    """Grid search for MLP hyperparameters. Evaluates on val set."""
+    """Grid search for MLP hyperparameters. Evaluates on val set.
+
+    Each candidate is trained with per-epoch validation tracking; the returned
+    model is the checkpoint with the lowest validation MAE, not the final
+    epoch state.
+    """
+    import time
     best_mae = float("inf")
     best_params = None
     best_model = None
@@ -134,20 +140,31 @@ def grid_search_mlp(x_train, y_train, x_val, y_val, param_grids):
 
     combinations = generate_combinations(param_grids)
     total = len(combinations)
+    t_start = time.time()
 
     for i, params in enumerate(combinations):
+        t_cand = time.time()
         print(f"  [{i+1}/{total}] Training with params: {params}", end="")
 
         try:
-            model = train_mlp(
+            result = train_mlp(
                 x_train, y_train,
+                x_val=x_val, y_val=y_val,
                 **params
             )
+            # train_mlp with val returns (model, history, best_mae)
+            if isinstance(result, tuple):
+                model, history, cand_best_mae = result
+            else:
+                model = result
+                history = None
+                cand_best_mae = float("inf")
+
             metrics = evaluate_model(model, x_val, y_val)
             mae = metrics["MAE"]
             r2 = metrics["R2"]
 
-            print(f" → MAE={mae:.4f}, R2={r2:.4f}")
+            print(f" → MAE={mae:.4f}, R2={r2:.4f}  ({time.time()-t_cand:.1f}s)")
 
             all_results.append({
                 "params": params,
@@ -156,6 +173,7 @@ def grid_search_mlp(x_train, y_train, x_val, y_val, param_grids):
                 "R2": r2,
                 "Pearson": metrics["Pearson"],
                 "Spearman": metrics["Spearman"],
+                "elapsed_s": time.time() - t_cand,
             })
 
             if mae < best_mae:
@@ -167,8 +185,10 @@ def grid_search_mlp(x_train, y_train, x_val, y_val, param_grids):
         except Exception as e:
             print(f" → ERROR: {e}")
 
+    elapsed = time.time() - t_start
     print(f"\nBest MLP params: {best_params}")
     print(f"Best MLP MAE: {best_mae:.4f}")
+    print(f"Search elapsed: {elapsed:.1f}s")
 
     return best_model, best_params, all_results
 
@@ -233,11 +253,21 @@ def cem_search_mlp(x_train, y_train, x_val, y_val,
                    elite_fraction: float = 0.2,
                    base_epochs: int = 100, base_batch_size: int = 4096,
                    seed: int | None = None) -> dict:
-    """Run CEM hyperparameter search for MLP. Evaluates on val set."""
+    """Run CEM hyperparameter search for MLP. Evaluates on val set.
+
+    Candidates are trained on the training split only with per-epoch
+    validation tracking; the returned model is the checkpoint with the lowest
+    validation MAE.  No refit on train+val is performed.
+    """
+    import time
     param_configs = make_mlp_param_configs()
     optimizer = CEMOptimizer(param_configs, elite_fraction=elite_fraction,
                              rng=np.random.default_rng(seed))
     all_results: list[dict] = []
+    best_model = None
+    best_mae = float("inf")
+    best_params = None
+    t_start = time.time()
 
     for gen in range(generations):
         samples = optimizer.sample(batch_size=batch_size)
@@ -247,13 +277,20 @@ def cem_search_mlp(x_train, y_train, x_val, y_val,
             kwargs = mlp_sample_to_kwargs(sample)
             kwargs["epochs"] = sample.get("epochs", base_epochs)
             kwargs["batch_size"] = base_batch_size
+            t_cand = time.time()
             try:
-                model = train_mlp(x_train, y_train, **kwargs)
+                result = train_mlp(x_train, y_train, x_val=x_val, y_val=y_val,
+                                   **kwargs)
+                if isinstance(result, tuple):
+                    model, _, cand_best_mae = result
+                else:
+                    model = result
+                    cand_best_mae = float("inf")
                 metrics = evaluate_model(model, x_val, y_val)
                 mae = metrics["MAE"]
                 print(f"    [{gen+1}/{generations}] "
                       f"cand {i+1}/{batch_size}: MAE={mae:.4f}  "
-                      f"{{k:v for k,v in sample.items()}}", flush=True)
+                      f"({time.time()-t_cand:.1f}s)", flush=True)
                 gen_scores.append(GenerationResult(params=sample, score=mae))
                 all_results.append({
                     "params": sample,
@@ -262,7 +299,12 @@ def cem_search_mlp(x_train, y_train, x_val, y_val,
                     "R2": metrics["R2"],
                     "Pearson": metrics["Pearson"],
                     "Spearman": metrics["Spearman"],
+                    "elapsed_s": time.time() - t_cand,
                 })
+                if mae < best_mae:
+                    best_mae = mae
+                    best_params = sample
+                    best_model = model
             except Exception as exc:
                 print(f"    [{gen+1}/{generations}] "
                       f"cand {i+1}/{batch_size}: ERROR {exc}", flush=True)
@@ -272,8 +314,15 @@ def cem_search_mlp(x_train, y_train, x_val, y_val,
         print(f"    Generation {gen+1} complete. "
               f"Best MAE so far: {optimizer.best_score():.4f}", flush=True)
 
+    elapsed = time.time() - t_start
+    print(f"\nCEM search elapsed: {elapsed:.1f}s")
+    print(f"Best CEM params: {best_params}")
+    print(f"Best CEM MAE: {best_mae:.4f}")
+
     return {
-        "best_params": optimizer.best_params(),
+        "best_model": best_model,
+        "best_params": best_params,
+        "best_mae": best_mae,
         "all_results": all_results,
     }
 
