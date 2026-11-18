@@ -33,6 +33,10 @@ from utils.euclid_distance_ml_model_training_utils import (
 )
 
 
+# Fixed training seed: same for all candidates to enable fair hyperparameter comparison.
+# Only hyperparameters (hidden_layers, epochs, lr) vary between candidates.
+TRAINING_SEED = 0
+
 # =============================================================================
 # Hyperparameter Grids
 # =============================================================================
@@ -132,6 +136,7 @@ def grid_search_mlp(x_train, y_train, x_val, y_val, param_grids):
     best_mae = float("inf")
     best_params = None
     best_model = None
+    best_history = None
     all_results = []
 
     print("\n" + "=" * 60)
@@ -147,6 +152,7 @@ def grid_search_mlp(x_train, y_train, x_val, y_val, param_grids):
         print(f"  [{i+1}/{total}] Training with params: {params}", end="")
 
         try:
+            torch.manual_seed(TRAINING_SEED)
             result = train_mlp(
                 x_train, y_train,
                 x_val=x_val, y_val=y_val,
@@ -180,6 +186,7 @@ def grid_search_mlp(x_train, y_train, x_val, y_val, param_grids):
                 best_mae = mae
                 best_params = params
                 best_model = model
+                best_history = history
                 print(f"    ★ New best! (saved)")
 
         except Exception as e:
@@ -190,7 +197,7 @@ def grid_search_mlp(x_train, y_train, x_val, y_val, param_grids):
     print(f"Best MLP MAE: {best_mae:.4f}")
     print(f"Search elapsed: {elapsed:.1f}s")
 
-    return best_model, best_params, all_results
+    return best_model, best_params, all_results, best_history
 
 
 # =============================================================================
@@ -267,6 +274,7 @@ def cem_search_mlp(x_train, y_train, x_val, y_val,
     best_model = None
     best_mae = float("inf")
     best_params = None
+    best_history = None
     t_start = time.time()
 
     for gen in range(generations):
@@ -279,12 +287,14 @@ def cem_search_mlp(x_train, y_train, x_val, y_val,
             kwargs["batch_size"] = base_batch_size
             t_cand = time.time()
             try:
+                torch.manual_seed(TRAINING_SEED)
                 result = train_mlp(x_train, y_train, x_val=x_val, y_val=y_val,
                                    **kwargs)
                 if isinstance(result, tuple):
-                    model, _, cand_best_mae = result
+                    model, history, cand_best_mae = result
                 else:
                     model = result
+                    history = None
                     cand_best_mae = float("inf")
                 metrics = evaluate_model(model, x_val, y_val)
                 mae = metrics["MAE"]
@@ -303,8 +313,9 @@ def cem_search_mlp(x_train, y_train, x_val, y_val,
                 })
                 if mae < best_mae:
                     best_mae = mae
-                    best_params = sample
+                    best_params = mlp_sample_to_kwargs(sample)
                     best_model = model
+                    best_history = history
             except Exception as exc:
                 print(f"    [{gen+1}/{generations}] "
                       f"cand {i+1}/{batch_size}: ERROR {exc}", flush=True)
@@ -323,6 +334,7 @@ def cem_search_mlp(x_train, y_train, x_val, y_val,
         "best_model": best_model,
         "best_params": best_params,
         "best_mae": best_mae,
+        "best_history": best_history,
         "all_results": all_results,
     }
 

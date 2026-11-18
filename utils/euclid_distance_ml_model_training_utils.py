@@ -396,9 +396,23 @@ def train_mlp(X, y, hidden_layers=(64, 32), epochs: int = 100,
             with torch.no_grad():
                 val_pred = model(X_val_std).squeeze(1)
             val_error = val_pred - y_val.squeeze(1)
+            val_mse = (val_error ** 2).mean().item()
             val_mae = val_error.abs().mean().item()
 
-            history.append({"epoch": epoch + 1, "val_mae": val_mae})
+            # Train eval (no grads, eval mode) for history
+            with torch.no_grad():
+                train_pred = model(X_std).squeeze(1)
+            train_error = train_pred - y.squeeze(1)
+            train_mse = (train_error ** 2).mean().item()
+            train_mae = train_error.abs().mean().item()
+
+            history.append({
+                "epoch": epoch + 1,
+                "train_mse": train_mse,
+                "train_mae": train_mae,
+                "val_mse": val_mse,
+                "val_mae": val_mae,
+            })
 
             last_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             if val_mae < best_mae:

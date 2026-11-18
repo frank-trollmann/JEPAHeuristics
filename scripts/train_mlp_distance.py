@@ -35,6 +35,7 @@ from utils.cem_optimizer import (
     mlp_sample_to_kwargs,
 )
 from scripts.euclid_distance_ml_model_training import (
+    TRAINING_SEED,
     generate_combinations,
     grid_search_mlp,
     cem_search_mlp,
@@ -239,8 +240,8 @@ def main():
     )
     parser.add_argument(
         "--tune", type=str, default=None,
-        choices=[None, "grid", "cem"],
-        help="Hyperparameter search: None (fixed), 'grid', or 'cem'"
+        choices=[None, "grid", "cem", "all"],
+        help="Hyperparameter search: None (fixed), 'grid', 'cem', or 'all' (both, pick best by val MAE)"
     )
     parser.add_argument(
         "--hidden-layers", type=int, nargs="*", default=[128, 64],
@@ -307,8 +308,14 @@ def main():
     print(f"Val size:       {args.val_size}")
     print(f"Test size:      {1.0 - args.train_size - args.val_size}")
     print(f"Tuning:         {args.tune}")
-    print(f"Seed:           {args.seed}")
     print(f"Output dir:     {args.output_dir}")
+    print()
+    print("Seeds:")
+    print(f"  Split seed:       {args.seed}  (deterministic 70/15/15 split)")
+    print(f"  Training seed:    {TRAINING_SEED}  (fixed for all candidates)")
+    if args.tune in ("cem", "all"):
+        print(f"  CEM seed:         {args.seed}  (independent optimizer RNG)")
+    print()
     if args.tune is None:
         print(f"Hidden layers:  {args.hidden_layers}")
         print(f"Epochs:         {args.epochs}")
@@ -361,40 +368,43 @@ def main():
         print("=" * 60)
         t_search = time.time()
 
-        XGB_PARAM_GRIDS = [
+        MLP_PARAM_GRIDS = [
             {"hidden_layers": [(32, 16), (64, 32), (128, 64)],
              "epochs": [50, 100, 200], "lr": [1e-4, 1e-3, 5e-3]},
             {"hidden_layers": [(64, 64, 32), (128, 128, 64)],
              "epochs": [100, 200], "lr": [1e-3, 5e-3]},
         ]
 
-        best_model, best_params, search_results = grid_search_mlp(
-            x_train, y_train, x_val, y_val, XGB_PARAM_GRIDS
+        best_model, best_params, search_results, best_history = grid_search_mlp(
+            x_train, y_train, x_val, y_val, MLP_PARAM_GRIDS
         )
         search_elapsed = time.time() - t_search
 
-        # Extract best state from the returned model
+        # Use the best checkpoint from the search directly
         best_state = {k: v.cpu().clone() for k, v in best_model.state_dict().items()}
-        # Re-run tracking to get full history for the best config
-        best_layers = best_params.get("hidden_layers", (128, 64))
-        best_epochs = best_params.get("epochs", 200)
-        best_lr = best_params.get("lr", 1e-3)
-        history, best_state, best_epoch, last_state, standardizer, model_config = (
-            train_mlp_with_tracking(
-                x_train, y_train, x_val, y_val,
-                hidden_layers=tuple(best_layers) if isinstance(best_layers, list) else best_layers,
-                epochs=best_epochs,
-                batch_size=args.batch_size,
-                lr=best_lr,
-                seed=args.seed,
-            )
-        )
+        best_val_mae = min(h["val_mae"] for h in best_history)
+        best_epoch = min(range(len(best_history)), key=lambda e: best_history[e]["val_mae"])
+        last_state = best_state  # same as best for search winner
+        standardizer = Standardizer()
+        standardizer.mean = best_model.standardizer_mean
+        standardizer.std = best_model.standardizer_std
+        bl = best_params.get("hidden_layers", (128, 64))
+        model_config = {
+            "hidden_layers": list(bl) if isinstance(bl, list) else list(bl),
+            "input_dim": x_train.shape[1],
+            "epochs": best_params.get("epochs", 200),
+            "batch_size": args.batch_size,
+            "lr": best_params.get("lr", 1e-3),
+            "seed": args.seed,
+        }
+        history = best_history
 
         print(f"\nGrid search elapsed: {search_elapsed:.1f}s")
         print(f"Best grid params: {best_params}")
+        print(f"Best grid val MAE: {best_val_mae:.4f}")
 
     elif args.tune == "cem":
-        # ── CEM Search (no refit on train+val) ──
+        # ── CEM Search ──
         print("\n" + "=" * 60)
         print("MLP Hyperparameter Tuning (CEM)")
         print("=" * 60)
@@ -411,27 +421,120 @@ def main():
         )
         search_elapsed = time.time() - t_search
 
+        best_model = cem_result["best_model"]
         best_params = cem_result["best_params"]
         search_results = cem_result["all_results"]
+        best_history = cem_result["best_history"]
         best_val_mae = cem_result["best_mae"]
 
-        # Get best params from CEM result, then retrain with tracking
-        best_layers = best_params.get("hidden_layers", (128, 64))
-        best_epochs = best_params.get("epochs", args.epochs)
-        best_lr = best_params.get("lr", 1e-3)
-        history, best_state, best_epoch, last_state, standardizer, model_config = (
-            train_mlp_with_tracking(
-                x_train, y_train, x_val, y_val,
-                hidden_layers=tuple(best_layers) if isinstance(best_layers, list) else best_layers,
-                epochs=best_epochs,
-                batch_size=args.batch_size,
-                lr=best_lr,
-                seed=args.seed,
-            )
-        )
+        # Use the best checkpoint from the search directly
+        best_state = {k: v.cpu().clone() for k, v in best_model.state_dict().items()}
+        best_epoch = min(range(len(best_history)), key=lambda e: best_history[e]["val_mae"])
+        last_state = best_state
+        standardizer = Standardizer()
+        standardizer.mean = best_model.standardizer_mean
+        standardizer.std = best_model.standardizer_std
+        bl = best_params.get("hidden_layers", (128, 64))
+        model_config = {
+            "hidden_layers": list(bl) if isinstance(bl, list) else list(bl),
+            "input_dim": x_train.shape[1],
+            "epochs": best_params.get("epochs", args.epochs),
+            "batch_size": args.batch_size,
+            "lr": best_params.get("lr", 1e-3),
+            "seed": args.seed,
+        }
+        history = best_history
 
         print(f"\nCEM search elapsed: {search_elapsed:.1f}s")
         print(f"Best CEM params: {best_params}")
+        print(f"Best CEM val MAE: {best_val_mae:.4f}")
+
+    elif args.tune == "all":
+        # ── Run both grid and CEM, pick winner by val MAE ──
+        print("\n" + "=" * 60)
+        print("MLP Hyperparameter Tuning (Grid + CEM, compare winners)")
+        print("=" * 60)
+
+        # --- Grid ---
+        print("\n--- Grid Search ---")
+        t_grid = time.time()
+        MLP_PARAM_GRIDS = [
+            {"hidden_layers": [(32, 16), (64, 32), (128, 64)],
+             "epochs": [50, 100, 200], "lr": [1e-4, 1e-3, 5e-3]},
+            {"hidden_layers": [(64, 64, 32), (128, 128, 64)],
+             "epochs": [100, 200], "lr": [1e-3, 5e-3]},
+        ]
+        grid_model, grid_params, grid_results, grid_history = grid_search_mlp(
+            x_train, y_train, x_val, y_val, MLP_PARAM_GRIDS
+        )
+        grid_elapsed = time.time() - t_grid
+        grid_val_mae = min(h["val_mae"] for h in grid_history)
+        print(f"Grid elapsed: {grid_elapsed:.1f}s  Best val MAE: {grid_val_mae:.4f}")
+
+        # --- CEM ---
+        print("\n--- CEM Search ---")
+        t_cem = time.time()
+        cem_result = cem_search_mlp(
+            x_train, y_train, x_val, y_val,
+            generations=args.cem_generations,
+            batch_size=args.cem_batch_size,
+            elite_fraction=args.cem_elite_fraction,
+            base_epochs=args.epochs,
+            base_batch_size=args.batch_size,
+            seed=args.seed,
+        )
+        cem_elapsed = time.time() - t_cem
+        cem_model = cem_result["best_model"]
+        cem_params = cem_result["best_params"]
+        cem_history = cem_result["best_history"]
+        cem_val_mae = cem_result["best_mae"]
+        print(f"CEM elapsed: {cem_elapsed:.1f}s  Best val MAE: {cem_val_mae:.4f}")
+
+        # --- Compare and pick winner by val MAE ---
+        search_results = []
+        search_elapsed = grid_elapsed + cem_elapsed
+        if grid_val_mae <= cem_val_mae:
+            print(f"\nWinner: Grid (val MAE {grid_val_mae:.4f} <= CEM {cem_val_mae:.4f})")
+            best_model = grid_model
+            best_params = grid_params
+            best_history = grid_history
+            search_results = grid_results
+            best_val_mae = grid_val_mae
+        else:
+            print(f"\nWinner: CEM (val MAE {cem_val_mae:.4f} < Grid {grid_val_mae:.4f})")
+            best_model = cem_model
+            best_params = cem_params
+            best_history = cem_history
+            search_results = cem_result["all_results"]
+            best_val_mae = cem_val_mae
+
+        # Build artifacts from winner
+        best_state = {k: v.cpu().clone() for k, v in best_model.state_dict().items()}
+        best_epoch = min(range(len(best_history)), key=lambda e: best_history[e]["val_mae"])
+        last_state = best_state
+        standardizer = Standardizer()
+        standardizer.mean = best_model.standardizer_mean
+        standardizer.std = best_model.standardizer_std
+        bl = best_params.get("hidden_layers", (128, 64))
+        model_config = {
+            "hidden_layers": list(bl) if isinstance(bl, list) else list(bl),
+            "input_dim": x_train.shape[1],
+            "epochs": best_params.get("epochs", args.epochs),
+            "batch_size": args.batch_size,
+            "lr": best_params.get("lr", 1e-3),
+            "seed": args.seed,
+        }
+        history = best_history
+        # Record both methods in search results for reference
+        search_results.insert(0, {
+            "params": {"_note": "grid_winner_val_mae", "grid": grid_params, "cem": cem_params},
+            "MAE": None,
+            "grid_val_mae": grid_val_mae,
+            "cem_val_mae": cem_val_mae,
+            "winner": "grid" if grid_val_mae <= cem_val_mae else "cem",
+            "grid_elapsed_s": grid_elapsed,
+            "cem_elapsed_s": cem_elapsed,
+        })
 
     else:
         # ── Fixed (no search) ──
@@ -509,16 +612,36 @@ def main():
     print("Evaluating best checkpoint...")
 
     def reconstruct_model(state_dict):
-        """Rebuild model architecture from saved state dict."""
-        input_dim = state_dict["0.weight"].shape[1]
+        """Rebuild model architecture from saved state dict.
+
+        Handles both formats:
+        - train_mlp format: keys 0.mean, 0.std, 1.weight, 1.bias, ...
+        - train_mlp_with_tracking format: keys 0.weight, 0.bias, 2.weight, ...
+        """
         layers_cfg = model_config["hidden_layers"]
-        layers = []
-        layers.append(torch.nn.Linear(input_dim, layers_cfg[0]))
-        layers.append(torch.nn.ReLU())
-        for i in range(len(layers_cfg) - 1):
-            layers.append(torch.nn.Linear(layers_cfg[i], layers_cfg[i + 1]))
+        if "0.mean" in state_dict:
+            # train_mlp format: _Standardize + Linear layers
+            input_dim = state_dict["1.weight"].shape[1]
+            from utils.euclid_distance_ml_model_training_utils import _Standardize
+            std_mean = state_dict["0.mean"]
+            std_std = state_dict["0.std"]
+            layers = [_Standardize(std_mean, std_std)]
+            prev_dim = input_dim
+            for h_dim in layers_cfg:
+                layers.append(torch.nn.Linear(prev_dim, h_dim))
+                layers.append(torch.nn.ReLU())
+                prev_dim = h_dim
+            layers.append(torch.nn.Linear(prev_dim, 1))
+        else:
+            # train_mlp_with_tracking format: Linear layers only
+            input_dim = state_dict["0.weight"].shape[1]
+            layers = []
+            layers.append(torch.nn.Linear(input_dim, layers_cfg[0]))
             layers.append(torch.nn.ReLU())
-        layers.append(torch.nn.Linear(layers_cfg[-1], 1))
+            for i in range(len(layers_cfg) - 1):
+                layers.append(torch.nn.Linear(layers_cfg[i], layers_cfg[i + 1]))
+                layers.append(torch.nn.ReLU())
+            layers.append(torch.nn.Linear(layers_cfg[-1], 1))
         model = torch.nn.Sequential(*layers).to(x_train.device)
         model.load_state_dict(state_dict)
         model.eval()
