@@ -368,8 +368,6 @@ def train_mlp(X, y, hidden_layers=(64, 32), epochs: int = 100,
     criterion = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    X_std = model[0](X)  # pre-standardize train input
-
     history = None
     best_state = None
     best_mae = float("inf")
@@ -377,7 +375,6 @@ def train_mlp(X, y, hidden_layers=(64, 32), epochs: int = 100,
 
     if x_val is not None and y_val is not None:
         y_val = y_val.reshape(-1, 1)
-        X_val_std = model[0](x_val)
         history = []
         n = X.shape[0]
 
@@ -387,21 +384,21 @@ def train_mlp(X, y, hidden_layers=(64, 32), epochs: int = 100,
             for start in range(0, n, batch_size):
                 idx = perm[start:start + batch_size]
                 optimizer.zero_grad()
-                loss = criterion(model(X_std[idx]), y[idx])
+                loss = criterion(model(X[idx]), y[idx])
                 loss.backward()
                 optimizer.step()
 
             # Validation eval (no grads, eval mode)
             model.eval()
             with torch.no_grad():
-                val_pred = model(X_val_std).squeeze(1)
+                val_pred = model(x_val).squeeze(1)
             val_error = val_pred - y_val.squeeze(1)
             val_mse = (val_error ** 2).mean().item()
             val_mae = val_error.abs().mean().item()
 
             # Train eval (no grads, eval mode) for history
             with torch.no_grad():
-                train_pred = model(X_std).squeeze(1)
+                train_pred = model(X).squeeze(1)
             train_error = train_pred - y.squeeze(1)
             train_mse = (train_error ** 2).mean().item()
             train_mae = train_error.abs().mean().item()
