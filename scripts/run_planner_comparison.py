@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import torch
 from huggingface_hub import snapshot_download
+from scipy.spatial import cKDTree
 from stable_worldmodel.envs.two_room import TwoRoomEnv
 
 import utils.load_fix_pretrained as load_util
@@ -20,6 +21,8 @@ from utils.dynamics_probe import BLOCK, action_statistics
 from utils.heuristic_models import train_pair_model
 from utils.latent_search import make_beam_planner, make_mcts_planner, make_search_planner
 from utils.pair_dataset import load_position_dataset, sample_pairs
+from utils.position_probe import fit_position_probe
+from utils.reference_distance import door_geometry, formula_labels
 from utils.sampling_planners import make_snapped_cem, plan_gradient, plan_icem, plan_mppi, plan_random
 from utils.trajectory_dataset import train_temporal_heuristic
 
@@ -44,7 +47,8 @@ def fit_to_pixels(heuristic, encodings, positions, splits, labeler, device, seed
 def main():
     parser = argparse.ArgumentParser(description="Compare planners (CEM, MPPI, iCEM, greedy / A* search through the predictor) under the same heuristics")
     parser.add_argument("--planners", nargs="+", choices=SAMPLING + SEARCH, required=True)
-    parser.add_argument("--heuristics", nargs="+", choices=("jepa", "learned", "temporal"), default=["learned"])
+    parser.add_argument("--heuristics", nargs="+", choices=("jepa", "learned", "temporal", "decoded"), default=["learned"],
+                        help="decoded = decode (x, y) from the latent, then the exact wall-aware distance to the goal (no learned distance model)")
     parser.add_argument("--kinds", nargs="+", choices=TASK_KINDS, default=list(TASK_KINDS))
     parser.add_argument("--episodes", type=int, default=50, help="Episodes per task kind")
     parser.add_argument("--budget-steps", type=int, default=150)
@@ -53,9 +57,11 @@ def main():
     parser.add_argument("--max-depth", type=int, default=12, help="Search: longest path in blocks")
     parser.add_argument("--beam-width", type=int, default=5, help="Beam search: nodes kept per level")
     parser.add_argument("--mcts-c", type=float, default=0.7, help="MCTS: exploration constant")
+    parser.add_argument("--mcts-merge", type=float, default=0.0, help="MCTS: prune children closer than this to a node already in the tree (0 = off)")
     parser.add_argument("--merge-distance", type=float, default=12.0, help="Search: latents closer than this are duplicates")
     parser.add_argument("--stop-at", type=float, default=10.0, help="Search: stop when the estimated distance is below this (px)")
     parser.add_argument("--mppi-temperature", type=float, default=0.5, help="MPPI temperature in units of the elite cost spread")
+    parser.add_argument("--mppi-adapt", action="store_true", help="MPPI diagnostic: refit the standard deviation to the weighted elites")
     parser.add_argument("--dataset", type=str, default=None)
     parser.add_argument("--checkpoint", type=str, default=None)
     parser.add_argument("--actions-h5", type=str, default="stable_worldmodel/datasets/tworoom/tworoom.h5")
@@ -118,6 +124,25 @@ def main():
         if name in args.heuristics and any(p in SEARCH for p in args.planners):
             in_pixels[name] = fit_to_pixels(heuristics[name], encodings, positions, splits, labeler, device, args.seed)
 
+    decoded_cost = None
+    if "decoded" in args.heuristics:
+        decoder = fit_position_probe(encodings[splits == "train"], positions[splits == "train"], hidden=(256, 256))
+        valid = cKDTree(positions)
+        geometry_env = TwoRoomEnv()
+        geometry_env.reset()
+        geometry = door_geometry(geometry_env, inflated=True)
+
+        def decoded_cost(goal, goal_xy):
+            goal_xy = np.asarray(goal_xy, dtype=float)[None]
+
+            def cost(final):
+                decoded = decoder.predict(final.cpu().numpy())
+                snapped = positions[valid.query(decoded)[1]].astype(float)
+                distance = formula_labels(snapped, np.repeat(goal_xy, len(snapped), axis=0), geometry)
+                return torch.tensor(distance, dtype=torch.float32, device=final.device)
+
+            return cost
+
     low = torch.tensor(np.tile((-1.0 - action_mean) / action_std, BLOCK), dtype=torch.float32, device=device)
     high = torch.tensor(np.tile((1.0 - action_mean) / action_std, BLOCK), dtype=torch.float32, device=device)
     assert low.shape == (ACTION_DIM,)
@@ -126,7 +151,7 @@ def main():
         if planner == "cem":
             return plan
         if planner == "mppi":
-            return partial(plan_mppi, temperature=args.mppi_temperature)
+            return partial(plan_mppi, temperature=args.mppi_temperature, adapt_variance=args.mppi_adapt)
         if planner == "dcem":
             return make_snapped_cem(action_mean, action_std)
         if planner == "random":
@@ -136,7 +161,7 @@ def main():
         if planner == "beam":
             return make_beam_planner(action_mean, action_std, args.beam_width, args.max_depth, args.merge_distance, args.stop_at)
         if planner == "mcts":
-            return make_mcts_planner(action_mean, action_std, args.expansions, args.mcts_c, args.max_depth, args.stop_at)
+            return make_mcts_planner(action_mean, action_std, args.expansions, args.mcts_c, args.max_depth, args.stop_at, args.mcts_merge)
         if planner == "icem":
             return partial(plan_icem, bounds=(low, high))
         kind, weight = ("astar", WEIGHTED) if planner == "wastar" else (planner, 1.0)
@@ -154,8 +179,11 @@ def main():
             if planner_name == "gd" and heuristic_name not in differentiable:
                 print(f"gd skipped for {heuristic_name}: no differentiable version")
                 continue
-            h = in_pixels[heuristic_name] if planner_name in SEARCH else (differentiable if planner_name == "gd" else heuristics)[heuristic_name]
-            make_cost = lambda goal, xy, h=h: (lambda final: h(final, goal.expand_as(final)))
+            if heuristic_name == "decoded":
+                make_cost = decoded_cost
+            else:
+                h = in_pixels[heuristic_name] if planner_name in SEARCH else (differentiable if planner_name == "gd" else heuristics)[heuristic_name]
+                make_cost = lambda goal, xy, h=h: (lambda final: h(final, goal.expand_as(final)))
             for kind, items in tasks.items():
                 started = time.time()
                 for index, (start, goal, path_length, *_) in enumerate(items):

@@ -144,14 +144,15 @@ def make_beam_planner(action_mean, action_std, width=5, max_depth=12, merge_dist
   return planner
 
 
-def make_mcts_planner(action_mean, action_std, simulations=100, c=0.7, max_depth=12, stop_at=10.0):
+def make_mcts_planner(action_mean, action_std, simulations=100, c=0.7, max_depth=12, stop_at=10.0, merge_distance=0.0):
   """
   Monte Carlo tree search (UCT) through the predictor over the 8 directions. One simulation walks down the
   tree by UCT (exploit: smaller mean estimated distance of what was backed up through the child, scaled to
   the range seen so far; explore: c * sqrt(ln N / n)), expands the leaf it reaches (8 children, one predictor
   batch) and backs up the leaf's best child estimate. There is no rollout: the heuristic stands in for it.
   The plan follows the most visited children, or the path to a node under stop_at if one was found.
-  There is no duplicate merging (it is a tree). The cost must be in px.
+  merge_distance > 0 prunes a child whose latent is closer than this to any node already in the tree (a
+  revisited position, as in make_search_planner); 0 keeps every child. The cost must be in px.
   """
   moves = torch.tensor(np.stack([normalised_block(d, action_mean, action_std) for d in DIRECTIONS]), dtype=torch.float32)
 
@@ -166,21 +167,25 @@ def make_mcts_planner(action_mean, action_std, simulations=100, c=0.7, max_depth
       emb, acts, hs, depth = [latent[None]], [latent.new_zeros(0, ACTION_DIM)], [first], [0]
       parent, move, kids, visits, total = [-1], [-1], [None], [0], [0.0]
       lo, hi, found = first, first, None
+      seen = latent[None]
       for _ in range(simulations):
         node, path = 0, [0]
-        while kids[node] is not None:
+        while kids[node]:
           n = sum(visits[k] for k in kids[node]) + 1
           scale = max(hi - lo, 1e-6)
           node = max(kids[node], key=lambda k: float("inf") if visits[k] == 0 else
                      (hi - total[k] / visits[k]) / scale + c * (np.log(n) / visits[k]) ** 0.5)
           path.append(node)
-        if depth[node] < max_depth and found is None:
+        if kids[node] is None and depth[node] < max_depth and found is None:
           window = emb[node][None].expand(len(moves_here), -1, -1)
           action = torch.cat([acts[node][None].expand(len(moves_here), -1, -1), moves_here[:, None]], dim=1)
           child = model.predict(window, model.action_encoder(action))[:, -1]
           estimates = cost(child).tolist()
           kids[node] = []
           for m in range(len(moves_here)):
+            if merge_distance > 0 and torch.cdist(child[m][None], seen).min() < merge_distance:
+              continue
+            seen = torch.cat([seen, child[m][None]])
             emb.append(torch.cat([emb[node], child[m][None]])[-history:])
             acts.append(action[m][-(history - 1):] if history > 1 else action[m][:0])
             hs.append(estimates[m])
@@ -194,7 +199,8 @@ def make_mcts_planner(action_mean, action_std, simulations=100, c=0.7, max_depth
           value = min(estimates)
           lo, hi = min(lo, value), max(hi, max(estimates))
           if value < stop_at:
-            found = kids[node][int(np.argmin(estimates))]
+            best_move = int(np.argmin(estimates))
+            found = next((k for k in kids[node] if move[k] == best_move), None)
         else:
           value = hs[node]
         for visited in path:

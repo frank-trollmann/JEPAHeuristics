@@ -59,3 +59,21 @@ def test_mcts_moves_toward_an_unreachable_goal_by_visit_count():
   blocks = make_mcts_planner(MEAN, STD, simulations=60)(model, torch.tensor([0.0]), px_cost(100.0))
 
   assert model.calls == 60 and blocks[0, 0].item() == 1.0
+
+
+def test_mcts_merging_prunes_duplicate_latents_and_still_finds_the_goal():
+  model = CountingModel()
+  blocks = make_mcts_planner(MEAN, STD, simulations=300, merge_distance=0.1)(model, torch.tensor([0.0]), px_cost(100.0))
+  plain = CountingModel()
+  make_mcts_planner(MEAN, STD, simulations=300)(plain, torch.tensor([0.0]), px_cost(100.0))
+
+  assert blocks[0, 0].item() == 1.0  # still heads toward the goal
+  assert model.calls < plain.calls  # pruned nodes run out: the 1-D line has only 25 distinct positions within 12 blocks
+  assert model.calls <= 30
+
+
+def test_mcts_merging_reaches_a_near_goal():
+  model = CountingModel()
+  blocks = make_mcts_planner(MEAN, STD, simulations=100, merge_distance=0.1)(model, torch.tensor([0.0]), px_cost(3.0))
+
+  assert blocks[:, 0].sum().item() == 3.0

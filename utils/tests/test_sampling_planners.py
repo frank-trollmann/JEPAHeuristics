@@ -66,3 +66,10 @@ def test_snapped_cem_only_returns_the_eight_directions_and_reaches_the_goal():
   table = torch.tensor(np.stack([normalised_block(d, mean, std) for d in DIRECTIONS]), dtype=torch.float32)
 
   assert all((table - block).abs().sum(dim=1).min() < 1e-5 for block in best)
+
+
+def test_mppi_with_adapted_variance_is_more_precise_than_with_fixed_variance():
+  fixed = np.mean([abs(_reaches(plan_mppi, 0.0, 3.0, seed=s) - 3.0) for s in range(5)])
+  adapted = np.mean([abs(_reaches(plan_mppi, 0.0, 3.0, seed=s, adapt_variance=True) - 3.0) for s in range(5)])
+
+  assert adapted < fixed and adapted < 0.05

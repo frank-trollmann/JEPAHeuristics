@@ -20,11 +20,14 @@ MOMENTUM = 0.1  # iCEM: weight of the old mean and std
 KEEP_ELITES = 5  # iCEM: elites carried over to the next iteration
 
 
-def plan_mppi(model, latent, cost, generator, device, horizon=HORIZON, num_samples=NUM_SAMPLES, temperature=TEMPERATURE):
+def plan_mppi(model, latent, cost, generator, device, horizon=HORIZON, num_samples=NUM_SAMPLES, temperature=TEMPERATURE,
+              adapt_variance=False):
   """
   MPPI. The library weights elites by softmax(-(cost - min cost) / 0.5), which only makes sense on the
   scale of the JEPA cost. Here the temperature is in units of the elite cost spread (their standard
   deviation), so multiplying the cost by any constant gives the same plan and all costs behave alike.
+  adapt_variance (not in the library, a diagnostic): refit the standard deviation to the weighted elites, as
+  CEM does, instead of keeping it fixed.
   """
   mean = torch.zeros(horizon, ACTION_DIM, device=device)
   var = VAR_SCALE * torch.ones(horizon, ACTION_DIM, device=device)
@@ -35,7 +38,10 @@ def plan_mppi(model, latent, cost, generator, device, horizon=HORIZON, num_sampl
       values, index = torch.topk(cost(rollout(model, latent, candidates)), TOP_K, largest=False)
       spread = values.std().clamp(min=1e-8)
       weights = torch.softmax(-(values - values.min()) / (temperature * spread), dim=0)
-      mean = (weights[:, None, None] * candidates[index]).sum(dim=0)
+      new_mean = (weights[:, None, None] * candidates[index]).sum(dim=0)
+      if adapt_variance:
+        var = ((weights[:, None, None] * (candidates[index] - new_mean) ** 2).sum(dim=0)).sqrt().clamp(min=1e-3)
+      mean = new_mean
   return mean
 
 
