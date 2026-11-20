@@ -645,3 +645,116 @@ def receding_horizon_plan(
         "success": False,
         "re_plans": re_plans,
     }
+
+
+# =============================================================================
+# Hybrid: Greedy-Initialized CEM
+# =============================================================================
+
+class GreedyInitCEM:
+    """CEM initialized with a greedy heuristic solution instead of uniform random."""
+
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        history_size: int = 3,
+        action_dim: int = 10,
+        action_low: float = -1.0,
+        action_high: float = 1.0,
+        elite_fraction: float = 0.2,
+        rng: Optional[np.random.Generator] = None,
+    ):
+        self.model = model
+        self.history_size = history_size
+        self.action_dim = action_dim
+        self.action_low = action_low
+        self.action_high = action_high
+        self.elite_fraction = elite_fraction
+        self.rng = rng if rng is not None else np.random.default_rng()
+
+    def _encode(self, image: torch.Tensor) -> torch.Tensor:
+        if image.dim() == 3:
+            image = image.unsqueeze(0).unsqueeze(0)
+        elif image.dim() == 4:
+            image = image.unsqueeze(0)
+        return self.model.encode({"pixels": image})["emb"]
+
+    def _greedy_plan(self, emb_s, emb_g, horizon, num_candidates=20):
+        H = self.history_size
+        A = self.action_dim
+        K = num_candidates
+        rng = self.rng
+        planned_actions = []
+        history = []
+        current_emb = emb_s
+
+        for _step in range(horizon):
+            raw = rng.uniform(self.action_low, self.action_high, size=(K, A))
+            n_hist = min(len(history), H)
+            hist_arr = np.zeros((0, A), dtype=np.float32) if not history else np.array(history[-n_hist:], dtype=np.float32)
+            if len(history) < H:
+                hist_arr = np.concatenate([np.zeros((H - len(history), A), dtype=np.float32), hist_arr], axis=0)
+            hist_tensor = torch.from_numpy(hist_arr).float().to(current_emb.device)
+            cand_tensor = torch.from_numpy(raw).float().to(current_emb.device)
+            history_for_pred = torch.cat([
+                hist_tensor.unsqueeze(0).expand(K, -1, -1)[:, :-1, :],
+                cand_tensor.unsqueeze(1),
+            ], dim=1)
+            with torch.no_grad():
+                act_emb = self.model.action_encoder(history_for_pred)
+                emb_s_exp = current_emb.expand(K, -1, -1)
+                emb_pred = self.model.predict(emb_s_exp, act_emb)[:, -1, :]
+                emb_g_exp = emb_g.squeeze(0).expand(K, -1)
+                mse = (emb_pred - emb_g_exp).pow(2).mean(dim=-1)
+            best_idx = int(mse.argmin())
+            best_action = raw[best_idx].copy()
+            planned_actions.append(best_action)
+            history.append(best_action)
+            current_emb = emb_pred[best_idx].unsqueeze(0).unsqueeze(0)
+        return np.array(planned_actions)
+
+    def sample_path(self, agent_image, goal_image, horizon, num_generations=5,
+                    batch_size=32, device="cpu"):
+        A = self.action_dim
+        flat_dim = horizon * A
+        rng = self.rng
+
+        emb_s = self._encode(agent_image)
+        emb_g = self._encode(goal_image)
+
+        # Greedy initialization
+        greedy_plan = self._greedy_plan(emb_s, emb_g, horizon, num_candidates=20)
+        mu = torch.from_numpy(greedy_plan.flatten()).float().to(device)
+        sigma = torch.ones(flat_dim, device=device) * 0.5
+        elite_idx = max(1, int(batch_size * self.elite_fraction))
+
+        for gen in range(num_generations):
+            candidates = torch.randn(batch_size, flat_dim, device=device) * sigma.unsqueeze(0) + mu.unsqueeze(0)
+            candidates = torch.clamp(candidates, self.action_low, self.action_high)
+            actions = candidates.view(batch_size, horizon, A)
+
+            H = self.history_size
+            batch_emb = emb_s.expand(batch_size, -1, -1)
+            for step in range(horizon):
+                step_actions = actions[:, step, :]
+                n_hist = min(step, H)
+                hist_arr = torch.zeros(batch_size, H, A, device=device)
+                for b in range(batch_size):
+                    start = max(0, step - n_hist)
+                    hist_arr[b, H - n_hist:, :] = actions[b, start:step, :]
+                history_for_pred = torch.cat([
+                    hist_arr[:, :-1, :],
+                    step_actions.unsqueeze(1),
+                ], dim=1)
+                with torch.no_grad():
+                    act_emb = self.model.action_encoder(history_for_pred)
+                    batch_emb = self.model.predict(batch_emb, act_emb)[:, -1:, :]
+
+            costs = (batch_emb.squeeze(-2) - emb_g.expand(batch_size, -1, -1).squeeze(-2)).pow(2).mean(dim=-1)
+            sorted_idx = torch.argsort(costs)
+            elite_candidates = candidates[sorted_idx[:elite_idx]]
+            mu = elite_candidates.mean(dim=0)
+            sigma = elite_candidates.std(dim=0).clamp(min=1e-6)
+            print(f"    Gen {gen+1}/{num_generations}: best={costs[sorted_idx[0]].item():.2f}  mean_cost={costs.mean().item():.2f}")
+
+        return candidates[sorted_idx[:1]].squeeze(0).view(horizon, A)
