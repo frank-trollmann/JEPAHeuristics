@@ -82,10 +82,10 @@ Beam search (width 5) is the cheaper alternative with the same success. I chose 
 |---|---|---|---|---|
 | **A\*, learned** | 0.94 / **0.95** | ~1.9k | 1.0 | yes |
 | beam (w = 5), learned | 0.92 / 0.96 | ~0.8k | 0.2 | yes |
-| snapped CEM, learned | 1.00 / *pending* | ~100-150k | 4.0 | worse when replanning every 2 blocks (0.86) |
+| snapped CEM, learned | 1.00 / 0.995 | ~100-150k | 4.0 | worse when replanning every 2 blocks (0.86) |
 | iCEM, learned | 0.96 / 0.98 | ~100k | 4.2 | worse when replanning every 2 blocks (0.72) |
 | MCTS + merging, learned | 0.92 / – | ~1.0k | – | merging is essential (0.54 without it) |
-| CEM (LeWM default), learned | 0.48 / *pending* | ~270k | 8.3 | – |
+| CEM (LeWM default), learned | 0.48 / 0.42 | ~270k | 8.3 | – |
 
 (log, entries P1, P2 and P3; `docs/monday-prep/evidence/planner_comparison_far.png`.) Snapped CEM and iCEM succeed slightly more often, but the difference is within the statistical tie range at 50 episodes and costs 50-100 times more predictor calls. A* is the best overall trade-off, and it is the only family that **keeps working when the heuristic is bad** (0.94-0.96 with the JEPA cost). That matters because a learned heuristic can be wrong in a place you haven't tested.
 
@@ -152,7 +152,7 @@ Beam search (width 5) is the cheaper alternative with the same success. I chose 
 | Random shooting | 0.06 | 0.16 |
 | MPPI (fixed / adapted spread) | 0.02 / 0.04 | 0.00 / 0.18 |
 
-Same-room and near tasks are easy for almost every planner with the learned heuristic (0.88-1.00; the exception is MPPI with a fixed spread on near tasks, 0.66; random shooting was run on far tasks only). **Replication with 200 new hard tasks** (interval about ±3 points): A* 0.95 / 0.96, greedy 0.95 / 0.96, beam 0.96 / 0.93 (learned / JEPA), and iCEM learned 0.98. The 50-episode conclusions hold. *Samplers with the JEPA cost on 200 tasks: running at the time of writing.*
+Same-room and near tasks are easy for almost every planner with the learned heuristic (0.88-1.00; the exception is MPPI with a fixed spread on near tasks, 0.66; random shooting was run on far tasks only). **Replication with 200 new hard tasks** (interval about ±3 points): search: A* 0.95 / 0.96, greedy 0.95 / 0.96, beam 0.96 / 0.925; samplers: iCEM 0.98 / 0.04, snapped CEM 0.995 / 0.05, CEM 0.42 / 0.02 (learned / JEPA). Every 200-episode cell is within 0.06 of its 50-episode value, so the conclusions hold.
 
 **2. Compute.** Search uses about 1-2k predictor calls per episode versus 100-270k for the samplers, 50-250 times fewer. In seconds the advantage is smaller (4-40 times: beam 0.2 s, A* 1.0 s, iCEM 4.2 s, CEM 8.3 s per episode) because samplers score 300 plans in one GPU batch, while search expands 8 children at a time.
 
