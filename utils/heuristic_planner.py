@@ -263,7 +263,7 @@ def greedy_jepa_cost_planner(
             emb_pred = model.predict(emb_s.expand(K, -1, -1), act_emb)[:, -1, :]
             cost = torch.mean((emb_pred - emb_g.squeeze(0)) ** 2, dim=-1)
 
-        best_idx = int(cost.argmin().clamp(0, K - 1))
+        best_idx = int(cost.argmin())
         planned_actions.append(raw[best_idx].copy())
         history_actions.append(raw[best_idx])
         emb_s = emb_pred[best_idx].unsqueeze(0).unsqueeze(0)
@@ -728,6 +728,8 @@ class GreedyInitCEM:
         sigma = torch.ones(flat_dim, device=device) * 0.5
         elite_idx = max(1, int(batch_size * self.elite_fraction))
 
+        best_cost = float("inf")
+        best_candidates = None
         for gen in range(num_generations):
             candidates = torch.randn(batch_size, flat_dim, device=device) * sigma.unsqueeze(0) + mu.unsqueeze(0)
             candidates = torch.clamp(candidates, self.action_low, self.action_high)
@@ -755,6 +757,12 @@ class GreedyInitCEM:
             elite_candidates = candidates[sorted_idx[:elite_idx]]
             mu = elite_candidates.mean(dim=0)
             sigma = elite_candidates.std(dim=0).clamp(min=1e-6)
-            print(f"    Gen {gen+1}/{num_generations}: best={costs[sorted_idx[0]].item():.2f}  mean_cost={costs.mean().item():.2f}")
+            gen_best = costs[sorted_idx[0]].item()
+            print(f"    Gen {gen+1}/{num_generations}: best={gen_best:.2f}  mean_cost={costs.mean().item():.2f}")
+            if gen_best < best_cost:
+                best_cost = gen_best
+                best_candidates = candidates[sorted_idx[:1]]
 
-        return candidates[sorted_idx[:1]].squeeze(0).view(horizon, A)
+        if best_candidates is None:
+            return candidates.squeeze(0).view(horizon, A)
+        return best_candidates.squeeze(0).view(horizon, A)

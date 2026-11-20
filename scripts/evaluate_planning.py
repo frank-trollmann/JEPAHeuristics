@@ -118,7 +118,14 @@ def run_cem_mlp(model, mlp, agent_img, goal_img, horizon, device, rng):
 
 
 def evaluate_latent(plan, model, agent_img, goal_img, horizon):
-    """Roll out plan through JEPA model, return latent-space metrics."""
+    """Roll out plan through JEPA model, return latent-space metrics.
+
+    Note: The `horizon` parameter is not used directly. The function iterates
+    over all actions in `plan`, which means for receding-horizon plans (which
+    contain `max_steps` actions) the latent metrics accumulate over more steps
+    than single-shot plans (which contain `horizon` actions). This makes latent
+    metrics between receding and single-shot modes not directly comparable.
+    """
     device = next(model.parameters()).device
     H = 3
 

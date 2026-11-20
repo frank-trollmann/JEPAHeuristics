@@ -160,13 +160,13 @@ class CEMPathSampler:
             agent_img = agent_image.unsqueeze(0).unsqueeze(0)
         else:
             agent_img = agent_image.unsqueeze(0)
-        agent_img = agent_img.expand(B, S, H, -1, -1, -1).to(device)
+        agent_img = agent_img.expand(B, 1, H, -1, -1, -1).to(device)
 
         if goal_image.dim() == 3:
             goal_img = goal_image.unsqueeze(0).unsqueeze(0)
         else:
             goal_img = goal_image.unsqueeze(0)
-        goal_img = goal_img.expand(B, S, H, -1, -1, -1).to(device)
+        goal_img = goal_img.expand(B, 1, H, -1, -1, -1).to(device)
 
         for gen in range(num_generations):
             # Sample batch of flattened action sequences
